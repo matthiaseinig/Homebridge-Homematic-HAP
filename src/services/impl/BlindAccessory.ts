@@ -1,6 +1,7 @@
 import { AccessoryBase } from '../AccessoryBase.js';
 import type { ChannelService, ServiceContext, ServiceDefinition } from '../types.js';
 import type { CcuChannel } from '../../types.js';
+import { normalizeLevelToPercent, percentToLevelFraction } from '../../util/sanitize.js';
 
 const BLIND_CHANNEL_TYPES = [
   'BLIND',
@@ -27,20 +28,19 @@ class BlindHandler extends AccessoryBase implements ChannelService {
     service.getCharacteristic(this.Characteristic.TargetPosition)
       .onGet(this.wrapGet<number>(() => this.target))
       .onSet(this.wrapSet<number>(async (value) => {
-        const clamped = Math.max(0, Math.min(100, Math.round(value)));
-        this.target = clamped;
-        await this.ccu.setValue(this.channelAddress, 'LEVEL', clamped / 100);
+        const pct = normalizeLevelToPercent(value) ?? 0;
+        this.target = pct;
+        await this.ccu.setValue(this.channelAddress, 'LEVEL', percentToLevelFraction(pct));
       }));
 
     service.getCharacteristic(this.Characteristic.PositionState)
       .onGet(this.wrapGet<number>(() => this.derivePositionState()));
 
     this.registerListener(this.channelAddress, 'LEVEL', (raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (!Number.isFinite(v)) {
+      const pct = normalizeLevelToPercent(raw);
+      if (pct === undefined) {
         return;
       }
-      const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
       this.current = pct;
       this.target = pct;
       service.updateCharacteristic(this.Characteristic.CurrentPosition, pct);

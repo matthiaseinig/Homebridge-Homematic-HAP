@@ -1,6 +1,7 @@
 import { AccessoryBase } from '../AccessoryBase.js';
 import type { ChannelService, ServiceContext, ServiceDefinition } from '../types.js';
 import type { CcuChannel } from '../../types.js';
+import { normalizeLevelToPercent, percentToLevelFraction } from '../../util/sanitize.js';
 
 const DIMMER_CHANNEL_TYPES = [
   'DIMMER',
@@ -18,35 +19,36 @@ class DimmerHandler extends AccessoryBase implements ChannelService {
     service.getCharacteristic(this.Characteristic.On)
       .onGet(this.wrapGet<boolean>(() => this.cachedLevel > 0))
       .onSet(this.wrapSet<boolean>(async (value) => {
-        const level = value ? Math.max(this.cachedLevel, 1) : 0;
-        await this.ccu.setValue(this.channelAddress, 'LEVEL', level / 100);
+        const pct = value ? Math.max(this.cachedLevel, 1) : 0;
+        await this.ccu.setValue(this.channelAddress, 'LEVEL', percentToLevelFraction(pct));
       }));
 
     service.getCharacteristic(this.Characteristic.Brightness)
       .onGet(this.wrapGet<number>(() => this.cachedLevel))
       .onSet(this.wrapSet<number>(async (value) => {
-        const clamped = Math.max(0, Math.min(100, Math.round(value)));
-        this.cachedLevel = clamped;
-        await this.ccu.setValue(this.channelAddress, 'LEVEL', clamped / 100);
+        const pct = normalizeLevelToPercent(value) ?? 0;
+        this.cachedLevel = pct;
+        await this.ccu.setValue(this.channelAddress, 'LEVEL', percentToLevelFraction(pct));
       }));
 
     this.registerListener(this.channelAddress, 'LEVEL', (raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (!Number.isFinite(v)) {
+      const pct = normalizeLevelToPercent(raw);
+      if (pct === undefined) {
         return;
       }
-      this.cachedLevel = Math.max(0, Math.min(100, Math.round(v * 100)));
-      service.updateCharacteristic(this.Characteristic.On, this.cachedLevel > 0);
-      service.updateCharacteristic(this.Characteristic.Brightness, this.cachedLevel);
+      this.cachedLevel = pct;
+      service.updateCharacteristic(this.Characteristic.On, pct > 0);
+      service.updateCharacteristic(this.Characteristic.Brightness, pct);
     });
 
     this.ccu.getValue(this.channelAddress, 'LEVEL').then((raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (Number.isFinite(v)) {
-        this.cachedLevel = Math.max(0, Math.min(100, Math.round(v * 100)));
-        service.updateCharacteristic(this.Characteristic.On, this.cachedLevel > 0);
-        service.updateCharacteristic(this.Characteristic.Brightness, this.cachedLevel);
+      const pct = normalizeLevelToPercent(raw);
+      if (pct === undefined) {
+        return;
       }
+      this.cachedLevel = pct;
+      service.updateCharacteristic(this.Characteristic.On, pct > 0);
+      service.updateCharacteristic(this.Characteristic.Brightness, pct);
     }).catch(() => undefined);
   }
 }

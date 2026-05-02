@@ -1,6 +1,7 @@
 import { AccessoryBase } from '../AccessoryBase.js';
 import type { ChannelService, ServiceContext, ServiceDefinition } from '../types.js';
 import type { CcuChannel } from '../../types.js';
+import { toFiniteNumber } from '../../util/sanitize.js';
 
 const THERMOSTAT_CHANNEL_TYPES = [
   'CLIMATECONTROL_REGULATOR',
@@ -57,8 +58,8 @@ class ThermostatHandler extends AccessoryBase implements ChannelService {
       .onGet(() => this.Characteristic.TemperatureDisplayUnits.CELSIUS);
 
     this.registerListener(this.channelAddress, 'ACTUAL_TEMPERATURE', (raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (Number.isFinite(v)) {
+      const v = toFiniteNumber(raw);
+      if (v !== undefined) {
         this.currentTemp = v;
         service.updateCharacteristic(this.Characteristic.CurrentTemperature, v);
         service.updateCharacteristic(this.Characteristic.CurrentHeatingCoolingState, this.deriveCurrentMode());
@@ -66,8 +67,8 @@ class ThermostatHandler extends AccessoryBase implements ChannelService {
     });
 
     this.registerListener(this.channelAddress, 'SET_TEMPERATURE', (raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (Number.isFinite(v)) {
+      const v = toFiniteNumber(raw);
+      if (v !== undefined) {
         this.targetTemp = v;
         service.updateCharacteristic(this.Characteristic.TargetTemperature, v);
       }

@@ -27,6 +27,17 @@ licensed under Apache License 2.0.
     reference; no source is copied verbatim.
     Copyright (c) thkl. Apache-2.0.
 
+  * homebridge-homematic-asaw
+    https://github.com/AlexanderSchmutz/homebridge-homematic-asaw
+    A maintained fork of thkl/homebridge-homematic that contributed two
+    robustness ideas adopted in src/util/sanitize.ts: defensive coercion
+    of CCU datapoint values to finite, in-range numbers before pushing
+    them to HomeKit characteristics, and the auto-detection of LEVEL
+    datapoints arriving as 0..1 vs 0..100 (a CCU firmware quirk that
+    otherwise produces 10000% blind positions). No code is copied
+    verbatim; the patterns were re-implemented.
+    Copyright (c) Alexander Schmutz. ISC License.
+
 This product also depends on, and gratefully links to, the following
 third-party libraries:
 

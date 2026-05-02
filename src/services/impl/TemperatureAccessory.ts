@@ -1,6 +1,7 @@
 import { AccessoryBase } from '../AccessoryBase.js';
 import type { ChannelService, ServiceContext, ServiceDefinition } from '../types.js';
 import type { CcuChannel } from '../../types.js';
+import { toFiniteNumber } from '../../util/sanitize.js';
 
 const TEMP_CHANNEL_TYPES = [
   'WEATHER',
@@ -20,11 +21,12 @@ class TemperatureHandler extends AccessoryBase implements ChannelService {
       .onGet(this.wrapGet<number>(() => this.value));
 
     const handle = (raw: unknown): void => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (Number.isFinite(v)) {
-        this.value = v;
-        service.updateCharacteristic(this.Characteristic.CurrentTemperature, v);
+      const v = toFiniteNumber(raw);
+      if (v === undefined) {
+        return;
       }
+      this.value = v;
+      service.updateCharacteristic(this.Characteristic.CurrentTemperature, v);
     };
 
     this.registerListener(channel.address, 'TEMPERATURE', handle);

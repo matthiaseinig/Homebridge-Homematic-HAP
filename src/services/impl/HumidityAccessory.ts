@@ -1,6 +1,7 @@
 import { AccessoryBase } from '../AccessoryBase.js';
 import type { ChannelService, ServiceContext, ServiceDefinition } from '../types.js';
 import type { CcuChannel } from '../../types.js';
+import { toRanged } from '../../util/sanitize.js';
 
 const HUMIDITY_CHANNEL_TYPES = [
   'WEATHER',
@@ -19,11 +20,16 @@ class HumidityHandler extends AccessoryBase implements ChannelService {
       .onGet(this.wrapGet<number>(() => this.value));
 
     this.registerListener(channel.address, 'HUMIDITY', (raw) => {
-      const v = typeof raw === 'number' ? raw : parseFloat(String(raw));
-      if (Number.isFinite(v)) {
-        this.value = Math.max(0, Math.min(100, Math.round(v)));
-        service.updateCharacteristic(this.Characteristic.CurrentRelativeHumidity, this.value);
+      const before = this.value;
+      const v = toRanged(raw, 0, 100, before);
+      if (v === before && raw !== before) {
+        // Input was unusable; toRanged returned the fallback. Skip the
+        // characteristic update so HomeKit isn't told the same value
+        // again on every spurious event.
+        return;
       }
+      this.value = Math.round(v);
+      service.updateCharacteristic(this.Characteristic.CurrentRelativeHumidity, this.value);
     });
   }
 }
