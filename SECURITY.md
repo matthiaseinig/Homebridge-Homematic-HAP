@@ -31,7 +31,7 @@ internet. The relevant threats it actively mitigates are:
 ## Reporting a vulnerability
 
 Please open a private security advisory at
-<https://github.com/matthiaseinig/homebridge-homematic-with-gui/security/advisories/new>
+<https://github.com/matthiaseinig/Homebridge-Homematic-HAP/security/advisories/new>
 rather than a public issue. Include:
 
 - A clear description of the issue.

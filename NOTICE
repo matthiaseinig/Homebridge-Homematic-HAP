@@ -1,9 +1,11 @@
-homebridge-homematic-with-gui
+Homebridge-Homematic-HAP
 Copyright 2026 Matthias Einig and contributors
 
-This product is a derivative of, and is heavily inspired by, the following
-two works by thkl (https://github.com/thkl), without which this project
-would not exist. Both upstream works are licensed under Apache License 2.0.
+This product is a derivative of, and is heavily inspired by, the
+following two works by thkl (https://github.com/thkl), without which
+this project would not exist. We gratefully acknowledge thkl's years
+of work on the HomeMatic ↔ HomeKit ecosystem. Both upstream works are
+licensed under Apache License 2.0.
 
   * hap-homematic
     https://github.com/thkl/hap-homematic

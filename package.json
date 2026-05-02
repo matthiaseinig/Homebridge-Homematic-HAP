@@ -9,13 +9,13 @@
   "contributors": [
     "thkl (original hap-homematic and homebridge-homematic author) <https://github.com/thkl>"
   ],
-  "homepage": "https://github.com/matthiaseinig/homebridge-homematic-with-gui#readme",
+  "homepage": "https://github.com/matthiaseinig/Homebridge-Homematic-HAP#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/matthiaseinig/homebridge-homematic-with-gui.git"
+    "url": "git+https://github.com/matthiaseinig/Homebridge-Homematic-HAP.git"
   },
   "bugs": {
-    "url": "https://github.com/matthiaseinig/homebridge-homematic-with-gui/issues"
+    "url": "https://github.com/matthiaseinig/Homebridge-Homematic-HAP/issues"
   },
   "keywords": [
     "homebridge-plugin",

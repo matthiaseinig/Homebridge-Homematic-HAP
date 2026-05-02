@@ -1,16 +1,44 @@
-# homebridge-homematic-with-gui
+# Homebridge-Homematic-HAP
 
-[![CI](https://github.com/matthiaseinig/homebridge-homematic-with-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/matthiaseinig/homebridge-homematic-with-gui/actions/workflows/ci.yml)
+[![CI](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/actions/workflows/ci.yml/badge.svg)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A modern Homebridge plugin for **HomeMatic** and **HomematicIP** devices,
 with a full configuration GUI and a one-click migration path from
 [hap-homematic](https://github.com/thkl/hap-homematic).
 
+> ## Credits & lineage
+>
+> **This project would not exist without the years of work that
+> [@thkl](https://github.com/thkl) put into the original HomeMatic ↔
+> HomeKit ecosystem.** It is a direct successor — in spirit, in
+> architecture and in configuration-format compatibility — to two of
+> his projects:
+>
+> - **[thkl/hap-homematic](https://github.com/thkl/hap-homematic)**
+>   — the standalone CCU3 / Raspberrymatic add-on. Its configuration
+>   model, channel-to-service dispatch design, multi-bridge instance
+>   pattern, ReGa script discovery, and overall architecture are the
+>   primary specification this plugin re-implements as a Homebridge
+>   dynamic platform plugin. The hap-homematic backup format is
+>   consumed verbatim so existing users can migrate without
+>   re-pairing. *(Apache-2.0)*
+>
+> - **[thkl/homebridge-homematic](https://github.com/thkl/homebridge-homematic)**
+>   — the original (now unmaintained) Homebridge plugin. The four-tier
+>   channel-service dispatch (address → device:channel → channel →
+>   device), the EventServer watchdog reconnection logic, and the
+>   BIN-RPC/XML-RPC + ReGa dual-transport split inform the modernised
+>   TypeScript implementation here. *(Apache-2.0)*
+>
+> Please ⭐️ both upstream repositories — they're the foundation. The
+> attribution is also recorded in [NOTICE](NOTICE) (which Apache-2.0
+> requires us to ship alongside the binary).
+
 ## Why this exists
 
 [`hap-homematic`](https://github.com/thkl/hap-homematic) — the brilliant
-CCU3 / Raspberrymatic add-on by [thkl](https://github.com/thkl) — gives
+CCU3 / Raspberrymatic add-on by [@thkl](https://github.com/thkl) — gives
 you fine-grained per-channel HomeKit mappings, multi-bridge support,
 and a polished UI. But it runs **on** the CCU, which is the part that
 keeps falling over. This plugin lifts the same model up onto Homebridge
@@ -110,23 +138,15 @@ npm run audit       # production deps only
 The whole quality gate (lint + build + test + audit) runs in CI on
 Node 20, 22 and 24.
 
-## Credits
+## Acknowledgements
 
-This project is a **direct successor**, in spirit and in
-configuration-format compatibility, to two excellent works by
-[thkl](https://github.com/thkl):
-
-- **[hap-homematic](https://github.com/thkl/hap-homematic)** — the
-  CCU3 add-on whose config schema, service-class dispatch design and
-  per-bridge instance pattern this plugin replicates so existing users
-  can migrate transparently. (Apache-2.0)
-- **[homebridge-homematic](https://github.com/thkl/homebridge-homematic)** —
-  the original Homebridge plugin whose four-tier channel→service
-  fallback and dual-transport (RPC events + ReGa pulls) model
-  inspired this implementation. (Apache-2.0)
-
-Both upstream repositories are credited in [NOTICE](NOTICE).
+Original architecture, configuration model, and migration compatibility
+are all owed to [@thkl](https://github.com/thkl)'s
+[hap-homematic](https://github.com/thkl/hap-homematic) and
+[homebridge-homematic](https://github.com/thkl/homebridge-homematic).
+This plugin would have started from a blank page without them. Any bugs
+in the port are mine, not theirs. Full attribution: [NOTICE](NOTICE).
 
 ## License
 
-[Apache-2.0](LICENSE) — same as upstream.
+[Apache-2.0](LICENSE) — same as both upstream projects.

@@ -5,8 +5,8 @@
   "strictValidation": false,
   "customUi": true,
   "customUiPath": "./homebridge-ui",
-  "headerDisplay": "**HomeMatic / HomematicIP** plugin with full GUI configuration. A spiritual successor to [hap-homematic](https://github.com/thkl/hap-homematic), running as a Homebridge plugin instead of a CCU addon. Use the **custom UI** to discover devices, expose variables and programs, and import an existing hap-homematic configuration.",
-  "footerDisplay": "Original architecture and configuration model: [thkl/hap-homematic](https://github.com/thkl/hap-homematic) and [thkl/homebridge-homematic](https://github.com/thkl/homebridge-homematic). Apache-2.0.",
+  "headerDisplay": "**HomeMatic / HomematicIP** plugin with full GUI configuration. A spiritual successor to [hap-homematic](https://github.com/thkl/hap-homematic) by [@thkl](https://github.com/thkl), running as a Homebridge plugin instead of a CCU addon. Use the **custom UI** below to discover devices, expose variables and programs, and import an existing hap-homematic configuration without re-pairing accessories.",
+  "footerDisplay": "Built on the architecture, configuration model and migration format pioneered by [@thkl](https://github.com/thkl) in [thkl/hap-homematic](https://github.com/thkl/hap-homematic) and [thkl/homebridge-homematic](https://github.com/thkl/homebridge-homematic) — please ⭐ those repos. Apache-2.0.",
   "schema": {
     "type": "object",
     "properties": {
