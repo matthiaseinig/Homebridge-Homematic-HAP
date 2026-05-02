@@ -1,0 +1,37 @@
+homebridge-homematic-with-gui
+Copyright 2026 Matthias Einig and contributors
+
+This product is a derivative of, and is heavily inspired by, the following
+two works by thkl (https://github.com/thkl), without which this project
+would not exist. Both upstream works are licensed under Apache License 2.0.
+
+  * hap-homematic
+    https://github.com/thkl/hap-homematic
+    The standalone HomeKit accessory protocol bridge that runs as a
+    Raspberrymatic / CCU3 addon. Its configuration model, channel-to-service
+    dispatch design, multi-bridge instance pattern, ReGa script discovery,
+    and overall architecture are the primary specification this project
+    re-implements as a Homebridge dynamic platform plugin. The hap-homematic
+    backup/import format is consumed verbatim so existing users can migrate.
+    Copyright (c) thkl. Apache-2.0.
+
+  * homebridge-homematic
+    https://github.com/thkl/homebridge-homematic
+    The original (now unmaintained) Homebridge plugin. The four-tier channel
+    service dispatch (address -> device:channel -> channel -> device), the
+    EventServer watchdog reconnection logic, and the BIN-RPC/XML-RPC + ReGa
+    dual-transport split inform the modernized TypeScript implementation
+    here. Individual ChannelServices/* files were studied as a behavioral
+    reference; no source is copied verbatim.
+    Copyright (c) thkl. Apache-2.0.
+
+This product also depends on, and gratefully links to, the following
+third-party libraries:
+
+  * homematic-xmlrpc (MIT)              -- XML-RPC client/server for CCU
+  * @homebridge/plugin-ui-utils (Apache-2.0) -- Custom Homebridge UI host
+  * iconv-lite       (MIT)              -- ISO-8859-1 string decoding
+  * tar              (ISC)              -- Backup tarball extraction
+  * homebridge       (Apache-2.0)       -- Type definitions only
+
+See LICENSE for the full Apache 2.0 license text that governs this project.

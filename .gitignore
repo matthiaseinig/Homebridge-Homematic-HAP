@@ -1,0 +1,46 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Test coverage
+coverage/
+*.lcov
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env / secrets — defense in depth even though we don't use any
+.env
+.env.local
+.env.*.local
+
+# Local Homebridge dev sandbox
+test/hbConfig/persist/
+test/hbConfig/accessories/
+test/hbConfig/.uix-secrets
+
+# References (cloned reference repos used for analysis only — not part of this plugin)
+references/
+target/
+
+# Package manager
+.npm
+.pnp.*
+
+# Optional outputs we don't ship
+*.tgz

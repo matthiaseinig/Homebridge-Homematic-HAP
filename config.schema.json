@@ -1,0 +1,115 @@
+{
+  "pluginAlias": "HomematicWithGui",
+  "pluginType": "platform",
+  "singular": true,
+  "strictValidation": false,
+  "customUi": true,
+  "customUiPath": "./homebridge-ui",
+  "headerDisplay": "**HomeMatic / HomematicIP** plugin with full GUI configuration. A spiritual successor to [hap-homematic](https://github.com/thkl/hap-homematic), running as a Homebridge plugin instead of a CCU addon. Use the **custom UI** to discover devices, expose variables and programs, and import an existing hap-homematic configuration.",
+  "footerDisplay": "Original architecture and configuration model: [thkl/hap-homematic](https://github.com/thkl/hap-homematic) and [thkl/homebridge-homematic](https://github.com/thkl/homebridge-homematic). Apache-2.0.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Platform name",
+        "type": "string",
+        "default": "HomematicWithGui",
+        "required": true
+      },
+      "ccuIp": {
+        "title": "CCU IP / hostname",
+        "type": "string",
+        "format": "hostname",
+        "required": true,
+        "placeholder": "192.168.1.10",
+        "description": "Address of your Raspberrymatic / CCU3."
+      },
+      "interfaces": {
+        "title": "CCU interfaces",
+        "type": "object",
+        "properties": {
+          "bidcosRf":      { "title": "BidCos-RF",       "type": "boolean", "default": true  },
+          "hmIpRf":        { "title": "HmIP-RF",         "type": "boolean", "default": true  },
+          "bidcosWired":   { "title": "BidCos-Wired",    "type": "boolean", "default": false },
+          "virtualDevices":{ "title": "VirtualDevices",  "type": "boolean", "default": true  },
+          "cuxd":          { "title": "CUxD (BIN-RPC, planned)", "type": "boolean", "default": false }
+        }
+      },
+      "useTls": {
+        "title": "Use TLS to talk to CCU",
+        "type": "boolean",
+        "default": false,
+        "description": "Use HTTPS for ReGa script calls. CCU self-signed certificates are accepted."
+      },
+      "ccuAuth": {
+        "title": "CCU authentication",
+        "type": "object",
+        "properties": {
+          "enabled":  { "title": "Use CCU authentication", "type": "boolean", "default": false },
+          "username": { "title": "Username",               "type": "string"  },
+          "password": { "title": "Password",               "type": "string", "format": "password" }
+        }
+      },
+      "eventServer": {
+        "title": "Local event server",
+        "type": "object",
+        "properties": {
+          "host": {
+            "title": "Bind host",
+            "type": "string",
+            "default": "0.0.0.0",
+            "description": "Address Homebridge advertises to the CCU as the callback URL. Leave 0.0.0.0 to auto-detect."
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer",
+            "default": 9875,
+            "minimum": 1024,
+            "maximum": 65535
+          },
+          "watchdogSeconds": {
+            "title": "Watchdog (s)",
+            "type": "integer",
+            "default": 300,
+            "minimum": 30,
+            "maximum": 3600,
+            "description": "Re-init the RPC subscription if no events arrive within this window."
+          }
+        }
+      },
+      "channels":  { "title": "Exposed channels",  "type": "array", "items": { "$ref": "#/definitions/channelMapping"  }, "default": [] },
+      "variables": { "title": "Exposed variables", "type": "array", "items": { "$ref": "#/definitions/variableMapping" }, "default": [] },
+      "programs":  { "title": "Exposed programs",  "type": "array", "items": { "$ref": "#/definitions/programMapping"  }, "default": [] }
+    },
+    "definitions": {
+      "channelMapping": {
+        "type": "object",
+        "properties": {
+          "address": { "title": "Channel address",     "type": "string" },
+          "name":    { "title": "Display name",        "type": "string" },
+          "service": { "title": "Service class",       "type": "string" },
+          "subtype": { "title": "Service variant",     "type": "string" },
+          "settings":{ "title": "Service settings",    "type": "object" }
+        },
+        "required": ["address", "service"]
+      },
+      "variableMapping": {
+        "type": "object",
+        "properties": {
+          "name":    { "title": "Variable name", "type": "string" },
+          "service": { "title": "Service class", "type": "string" },
+          "settings":{ "title": "Settings",      "type": "object" }
+        },
+        "required": ["name"]
+      },
+      "programMapping": {
+        "type": "object",
+        "properties": {
+          "name":    { "title": "Program name",  "type": "string" },
+          "settings":{ "title": "Settings",      "type": "object" }
+        },
+        "required": ["name"]
+      }
+    }
+  }
+}

@@ -1,0 +1,154 @@
+# Integration guide
+
+## Prerequisites
+
+| Item | Minimum |
+| ---- | ------- |
+| Homebridge | 1.8 (also runs on 2.0 beta) |
+| Node.js | 20.18 / 22.10 / 24.0 (LTS lines) |
+| CCU firmware | RaspberryMatic 3.65 or recent CCU3 firmware |
+| Network | Plugin host and CCU must be on the same routable subnet |
+
+The plugin only talks to the CCU over the **LAN**. It does not need
+internet access. It does not contact any of the author's servers, send
+analytics, or auto-update.
+
+## Network requirements
+
+| Direction | Port | Protocol | Why |
+| --------- | ---- | -------- | --- |
+| Plugin → CCU | 8181 | HTTP    | ReGa scripts (discovery, variables, programs) |
+| Plugin → CCU | 2001 | XML-RPC | BidCos-RF interface (`setValue`, `init`) |
+| Plugin → CCU | 2010 | XML-RPC | HmIP-RF interface |
+| Plugin → CCU | 2000 | XML-RPC | BidCos-Wired (optional) |
+| Plugin → CCU | 9292 | XML-RPC | Virtual Devices |
+| CCU → Plugin | 9875 (default, configurable) | XML-RPC | inbound event callbacks |
+
+If the CCU and Homebridge are not on the same broadcast domain, you
+need to **set the event-server bind host explicitly** to a routable
+address that the CCU can reach. The default `0.0.0.0` makes the plugin
+auto-detect a local IPv4, which works for most home setups.
+
+If you run Homebridge in Docker, the event server port (9875 by
+default) must be **published with the host's IP**, not just the
+`0.0.0.0` shorthand — otherwise the CCU will try to call back on a
+container-internal address it can't reach. Example:
+
+```yaml
+ports:
+  - "9875:9875"
+```
+
+## Configuration
+
+The plugin renders a custom UI in the Homebridge UI; you should rarely
+need to edit JSON by hand. For reference, the persisted config block
+looks like this:
+
+```json
+{
+  "platform": "HomematicWithGui",
+  "name": "HomematicWithGui",
+  "ccuIp": "192.168.1.10",
+  "useTls": false,
+  "interfaces": {
+    "bidcosRf": true,
+    "hmIpRf": true,
+    "bidcosWired": false,
+    "virtualDevices": true,
+    "cuxd": false
+  },
+  "ccuAuth": {
+    "enabled": false,
+    "username": "",
+    "password": ""
+  },
+  "eventServer": {
+    "host": "0.0.0.0",
+    "port": 9875,
+    "watchdogSeconds": 300
+  },
+  "channels": [
+    {
+      "address": "HmIP.000ABCDEF12345:1",
+      "name": "Living Room Light",
+      "service": "SwitchAccessory",
+      "subtype": "outlet"
+    }
+  ],
+  "variables": [{ "name": "PartyMode" }],
+  "programs":  [{ "name": "Wake up" }]
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `ccuIp` | IP or hostname of the CCU. Both work; hostnames are resolved at start-up. |
+| `useTls` | If `true`, ReGa scripts use HTTPS on port 48181. The CCU's self-signed cert is accepted. |
+| `interfaces.*` | Toggle per CCU interface. Disable interfaces you don't use to silence warnings on hosts that block those ports. |
+| `ccuAuth.enabled` | Set to `true` if your CCU requires Basic auth on the WebUI. The credentials never leave `config.json` and are never logged. |
+| `eventServer.host` | Address the CCU should call back. `0.0.0.0` auto-detects. Set explicitly when running in Docker or behind multiple NICs. |
+| `eventServer.port` | Default 9875. Pick anything in 1024–65535. |
+| `eventServer.watchdogSeconds` | If no events arrive for this long, every interface re-subscribes. Default 300 s. |
+| `channels[]` | Per-channel HomeKit mapping, see service registry below. |
+| `variables[]` | CCU variables exposed as Switch (boolean) / Lightbulb (numeric). |
+| `programs[]` | CCU programs exposed as a single-shot Switch. |
+
+### Service registry
+
+| `service` key | HAP service(s) | Suitable for | Variants (`subtype`) |
+| ------------- | --------------- | ------------ | --------------------- |
+| `SwitchAccessory` | Switch / Outlet / Lightbulb | Binary relays, IP outlets | `switch`, `outlet`, `lightbulb` |
+| `DimmerAccessory` | Lightbulb (with Brightness) | Dimmable lights | – |
+| `BlindAccessory` | WindowCovering | Roller shutters, blinds | – |
+| `ThermostatAccessory` | Thermostat | Radiator and IP wall thermostats | – |
+| `ContactAccessory` | ContactSensor / Door / Window | Door & window contacts | `contact`, `door`, `window` |
+| `MotionAccessory` | MotionSensor | Motion + IR detectors | – |
+| `SmokeAccessory` | SmokeSensor | Homematic smoke detectors | – |
+| `LeakAccessory` | LeakSensor | Water-detection sensors | – |
+| `TemperatureAccessory` | TemperatureSensor | Climate / weather channels | – |
+| `HumidityAccessory` | HumiditySensor | Climate / weather channels | – |
+
+For variables, the plugin auto-picks `VariableSwitchAccessory` for
+boolean variables and `VariableLightAccessory` for numeric ones (with
+the variable's min/max as the Brightness range).
+
+## Security
+
+- Run Homebridge as a **dedicated, non-root user**, the way the
+  Homebridge installer does by default.
+- `config.json` is plain JSON. Make sure it is `chmod 600` and owned by
+  the Homebridge user.
+- The plugin writes its own state under `<homebridge-storage>/homebridge-homematic-with-gui/`.
+  No file outside that directory is opened by the plugin.
+- The custom UI is reachable only through the Homebridge UI itself;
+  the plugin does not open any extra TCP/HTTP listeners. Do not expose
+  the Homebridge UI to the public internet.
+
+See [SECURITY.md](../SECURITY.md) for the full threat model.
+
+## Troubleshooting
+
+**The CCU is reachable but discovery is empty.**
+Check that the CCU's WebUI Settings → Security do not have *Authenticate
+internal access* set without ticking the "Use CCU authentication"
+option in this plugin too.
+
+**Devices show up but never update in real time.**
+Check the EventServer port. The CCU's *Status & Maintenance → Service
+Messages* page lists registered RPC clients — your callback URL should
+be there. If it isn't, there's a routing or NAT issue between CCU and
+Homebridge.
+
+**"No RPC client for interface X"**
+The interface failed to subscribe at startup (often because the port is
+firewalled or the CCU has that interface disabled). Either enable the
+interface on the CCU or untoggle it in the plugin's interface list.
+
+**Variables seem to lag.**
+Variables are polled every 60 s. The CCU does not push variable
+updates through the RPC channel reliably. There is no fix on our side.
+
+**Heavy log spam from `[HomematicWithGui:ccu:events]`**
+Set `--debug` off — at default verbosity, only errors and reconnects
+log.

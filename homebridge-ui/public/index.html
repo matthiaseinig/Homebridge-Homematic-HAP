@@ -1,0 +1,101 @@
+<!--
+  homebridge-config-ui-x renders this inside a sandboxed iframe and
+  injects Bootstrap 5 into the parent. We deliberately omit <html>,
+  <head> and <body> per the plugin-ui-utils convention.
+-->
+
+<style>
+  .hgui-card { margin-bottom: 1rem; }
+  .hgui-channel-row { font-family: var(--bs-font-monospace); font-size: 0.875rem; }
+  .hgui-warn { color: #b86e00; }
+  .hgui-pill { font-size: 0.75rem; }
+  .hgui-section-header { display: flex; justify-content: space-between; align-items: center; }
+  .hgui-empty { color: #666; font-style: italic; }
+  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid #ddd; z-index: 5; }
+</style>
+
+<div id="hgui-root">
+  <div class="hgui-card card">
+    <div class="card-body">
+      <h5 class="card-title">CCU connection</h5>
+      <p class="text-muted mb-3">
+        Address of your CCU3 / Raspberrymatic. Credentials are optional and
+        only required if you have enabled CCU authentication.
+      </p>
+      <div id="hgui-config-form-host"></div>
+      <button id="hgui-test-btn" class="btn btn-outline-primary me-2">Test connection</button>
+      <button id="hgui-discover-btn" class="btn btn-primary">Discover devices</button>
+      <span id="hgui-test-result" class="ms-2"></span>
+    </div>
+  </div>
+
+  <div class="hgui-card card">
+    <div class="card-body">
+      <div class="hgui-section-header">
+        <h5 class="card-title mb-0">Channels</h5>
+        <span id="hgui-channels-count" class="badge bg-secondary hgui-pill">0</span>
+      </div>
+      <p class="text-muted">
+        Click a channel to expose it as a HomeKit accessory. Choose the service
+        type and (where applicable) the variant.
+      </p>
+      <div id="hgui-channels-host"><p class="hgui-empty">Run "Discover devices" to populate this list.</p></div>
+    </div>
+  </div>
+
+  <div class="hgui-card card">
+    <div class="card-body">
+      <div class="hgui-section-header">
+        <h5 class="card-title mb-0">Variables</h5>
+        <span id="hgui-variables-count" class="badge bg-secondary hgui-pill">0</span>
+      </div>
+      <p class="text-muted">CCU system variables exposed as HomeKit Switches or numeric Lightbulbs.</p>
+      <div id="hgui-variables-host"><p class="hgui-empty">Run "Discover devices" first.</p></div>
+    </div>
+  </div>
+
+  <div class="hgui-card card">
+    <div class="card-body">
+      <div class="hgui-section-header">
+        <h5 class="card-title mb-0">Programs</h5>
+        <span id="hgui-programs-count" class="badge bg-secondary hgui-pill">0</span>
+      </div>
+      <p class="text-muted">Each selected program becomes a HomeKit Switch that triggers it.</p>
+      <div id="hgui-programs-host"><p class="hgui-empty">Run "Discover devices" first.</p></div>
+    </div>
+  </div>
+
+  <div class="hgui-card card">
+    <div class="card-body">
+      <h5 class="card-title">Import from hap-homematic</h5>
+      <p class="text-muted">
+        Upload a hap-homematic <strong>backup tarball</strong> (the .tar.gz
+        produced by the hap-homematic backup screen) or paste a raw
+        <code>config.json</code>. Existing channels/variables/programs in
+        this Homebridge config are kept; imported entries are merged on top.
+      </p>
+      <div class="row g-2">
+        <div class="col-md-6">
+          <label for="hgui-import-file" class="form-label">Backup tarball</label>
+          <input type="file" id="hgui-import-file" class="form-control" accept=".tar.gz,.tgz,application/gzip">
+        </div>
+        <div class="col-md-6">
+          <label for="hgui-import-paste" class="form-label">…or paste config.json</label>
+          <textarea id="hgui-import-paste" class="form-control font-monospace" rows="3" placeholder="{ &quot;ccuIP&quot;: &quot;192.168.1.10&quot;, ... }"></textarea>
+        </div>
+      </div>
+      <div class="mt-3">
+        <button id="hgui-import-btn" class="btn btn-warning">Import</button>
+        <span id="hgui-import-status" class="ms-2"></span>
+      </div>
+      <div id="hgui-import-warnings" class="mt-3"></div>
+    </div>
+  </div>
+
+  <div class="hgui-floating-bar">
+    <button id="hgui-save-btn" class="btn btn-success">Save configuration</button>
+    <span id="hgui-save-status" class="ms-2"></span>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>

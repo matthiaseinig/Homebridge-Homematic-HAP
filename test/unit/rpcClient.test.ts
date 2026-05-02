@@ -1,0 +1,94 @@
+import { describe, it, expect, vi } from 'vitest';
+import { RpcClient, type RpcTransport } from '../../src/ccu/RpcClient.js';
+import { PrefixedLogger } from '../../src/util/logger.js';
+import { makeLog } from '../helpers/hapStub.js';
+
+function makeTransport(): RpcTransport & { calls: Array<[string, unknown[]]> } {
+  const calls: Array<[string, unknown[]]> = [];
+  return {
+    calls,
+    call: vi.fn(async (method: string, params: unknown[]) => {
+      calls.push([method, params]);
+      if (method === 'system.listMethods') {
+        return ['init', 'getValue'];
+      }
+      if (method === 'getValue') {
+        return 42;
+      }
+      return '';
+    }),
+    close: vi.fn(async () => undefined),
+  };
+}
+
+function makeClient(transport?: RpcTransport): RpcClient {
+  return new RpcClient({
+    interfaceId: 'BidCos-RF',
+    host: '127.0.0.1',
+    callbackUrl: 'http://example/cb',
+    callbackId: 'cbid',
+    log: new PrefixedLogger(makeLog(), 'rpc-test'),
+    transport,
+  });
+}
+
+describe('RpcClient', () => {
+  it('subscribe calls init and marks subscribed', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    expect(c.isSubscribed()).toBe(false);
+    await c.subscribe();
+    expect(c.isSubscribed()).toBe(true);
+    expect(t.calls[0]).toEqual(['init', ['http://example/cb', 'cbid']]);
+  });
+
+  it('unsubscribe re-calls init with empty id', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    await c.subscribe();
+    t.calls.length = 0;
+    await c.unsubscribe();
+    expect(t.calls[0]).toEqual(['init', ['http://example/cb', '']]);
+    expect(c.isSubscribed()).toBe(false);
+  });
+
+  it('unsubscribe is a no-op when not subscribed', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    await c.unsubscribe();
+    expect(t.calls).toEqual([]);
+  });
+
+  it('unsubscribe swallows errors', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    await c.subscribe();
+    (t.call as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    await expect(c.unsubscribe()).resolves.toBeUndefined();
+    expect(c.isSubscribed()).toBe(false);
+  });
+
+  it('getValue and setValue forward to transport', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    expect(await c.getValue('HmIP.0:1', 'STATE')).toBe(42);
+    await c.setValue('HmIP.0:1', 'STATE', true);
+    expect(t.calls.find((c) => c[0] === 'setValue')).toBeDefined();
+  });
+
+  it('ping returns true on success, false on error', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    expect(await c.ping()).toBe(true);
+    (t.call as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('nope'));
+    expect(await c.ping()).toBe(false);
+  });
+
+  it('close releases the transport', async () => {
+    const t = makeTransport();
+    const c = makeClient(t);
+    await c.subscribe();
+    await c.close();
+    expect(t.close).toHaveBeenCalled();
+  });
+});
