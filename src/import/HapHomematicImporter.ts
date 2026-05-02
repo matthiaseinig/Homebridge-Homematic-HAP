@@ -13,7 +13,7 @@
 
 import { Buffer } from 'node:buffer';
 import { Readable } from 'node:stream';
-import { extract as tarExtract } from 'tar';
+import { list as tarList } from 'tar';
 import type {
   ChannelMapping,
   ProgramMapping,
@@ -192,9 +192,12 @@ async function extractConfigJson(tarball: Buffer): Promise<HapHomematicConfigSha
   return new Promise<HapHomematicConfigShape>((resolve, reject) => {
     let resolved = false;
     const stream = Readable.from(tarball);
-    const parser = tarExtract({
+    // `tar.list` is parse-only — unlike `tar.extract` it never writes
+    // files to disk, which matters because we run inside a long-lived
+    // Homebridge process whose cwd we should never modify.
+    const parser = tarList({
       filter: (path) => path.endsWith('config.json'),
-      onentry: (entry) => {
+      onReadEntry: (entry) => {
         if (resolved) {
           entry.resume();
           return;
@@ -229,18 +232,18 @@ async function extractConfigJson(tarball: Buffer): Promise<HapHomematicConfigSha
         });
       },
     });
-    parser.on('finish', () => {
+    parser.on('end', () => {
       if (!resolved) {
         reject(new ImportError('No config.json found in backup'));
       }
     });
-    parser.on('error', (err) => {
+    parser.on('error', (err: Error) => {
       if (!resolved) {
         resolved = true;
         reject(err);
       }
     });
-    stream.pipe(parser);
+    stream.pipe(parser as unknown as NodeJS.WritableStream);
   });
 }
 
