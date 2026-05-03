@@ -6,16 +6,31 @@
  * Responses are ISO-8859-1 (Latin-1) and contain a chunk of XML. We
  * never eval or otherwise execute the response — we treat it as text and
  * extract values with a small parser in `parseRegaResult`.
+ *
+ * **Authentication.** RaspberryMatic / CCU3 do not use HTTP Basic auth on
+ * /tclrega.exe; they use a session-token model:
+ *
+ *   1. POST {"version":"1.1","method":"Session.login","params":{...}}
+ *      to /api/homematic.cgi (port 80 / 443) → returns a session id.
+ *   2. Subsequent ReGa requests pass that id as `?sid=<id>` on the URL.
+ *
+ * We acquire a session lazily on first authenticated call, cache it on
+ * the client, and renew transparently on 401.
  */
 
 import { Buffer } from 'node:buffer';
-import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { request as httpRequest, type IncomingMessage, type RequestOptions } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { decode as iconvDecode } from 'iconv-lite';
+// iconv-lite is a CommonJS module; the named-import form only works under
+// vitest's esbuild transform, not in real Node ESM. Default import + namespace
+// access is the portable form.
+import iconv from 'iconv-lite';
 import type { PrefixedLogger } from '../util/logger.js';
 
 const REGA_PORT_HTTP = 8181;
 const REGA_PORT_HTTPS = 48181;
+const API_PORT_HTTP = 80;
+const API_PORT_HTTPS = 443;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_SCRIPT_LENGTH = 256 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -25,6 +40,8 @@ export interface RegaClientOptions {
   useTls?: boolean;
   /** Override the default 8181/48181 ports (mainly for tests). */
   port?: number;
+  /** Override the default 80/443 port for /api/homematic.cgi (mainly for tests). */
+  apiPort?: number;
   timeoutMs?: number;
   auth?: { username: string; password: string };
   log: PrefixedLogger;
@@ -48,14 +65,17 @@ export class RegaClient {
   private readonly host: string;
   private readonly useTls: boolean;
   private readonly portOverride: number | undefined;
+  private readonly apiPortOverride: number | undefined;
   private readonly timeoutMs: number;
   private readonly auth?: { username: string; password: string };
   private readonly log: PrefixedLogger;
+  private sessionId: string | undefined;
 
   constructor(opts: RegaClientOptions) {
     this.host = opts.host;
     this.useTls = Boolean(opts.useTls);
     this.portOverride = opts.port;
+    this.apiPortOverride = opts.apiPort;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.auth = opts.auth;
     this.log = opts.log;
@@ -72,7 +92,7 @@ export class RegaClient {
     const body = Buffer.from(source, 'utf8');
     this.log.debug('Sending ReGa script (%d bytes)', body.length);
 
-    const raw = await this.post(body);
+    const raw = await this.postRega(body);
     return this.parseRegaResult(raw);
   }
 
@@ -104,8 +124,13 @@ export class RegaClient {
     await this.script(`dom.GetObject(ID_PROGRAMS).Get("${name}").ProgramExecute();`);
   }
 
+  /** Drop the cached session id; the next authenticated call will re-login. */
+  invalidateSession(): void {
+    this.sessionId = undefined;
+  }
+
   private parseRegaResult(raw: Buffer): RegaResult {
-    const text = iconvDecode(raw, 'ISO-8859-1');
+    const text = iconv.decode(raw, 'ISO-8859-1');
     const xmlOpen = text.lastIndexOf('<xml>');
     const xmlClose = text.lastIndexOf('</xml>');
     if (xmlOpen === -1 || xmlClose === -1 || xmlClose < xmlOpen) {
@@ -117,51 +142,116 @@ export class RegaClient {
     return { xml, stdout };
   }
 
-  private post(body: Buffer): Promise<Buffer> {
+  // --- session auth -------------------------------------------------
+
+  /**
+   * Lazily acquire a CCU session id when authentication is configured.
+   * Returns undefined if no auth is configured (so callers can omit the
+   * `?sid=` query param on open CCUs).
+   */
+  private async ensureSession(): Promise<string | undefined> {
+    if (!this.auth) {
+      return undefined;
+    }
+    if (this.sessionId) {
+      return this.sessionId;
+    }
+    const body = Buffer.from(JSON.stringify({
+      version: '1.1',
+      method: 'Session.login',
+      params: { username: this.auth.username, password: this.auth.password },
+    }), 'utf8');
+
+    const raw = await this.httpRequest(
+      this.apiPortOverride ?? (this.useTls ? API_PORT_HTTPS : API_PORT_HTTP),
+      '/api/homematic.cgi',
+      body,
+      'application/json',
+    );
+    const text = raw.toString('utf8');
+    let parsed: { result?: unknown; error?: { message?: string } };
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new RegaError('CCU auth: malformed JSON response');
+    }
+    if (parsed.error) {
+      throw new RegaError(`CCU auth failed: ${parsed.error.message ?? 'unknown'}`);
+    }
+    if (typeof parsed.result !== 'string' || parsed.result.length === 0) {
+      throw new RegaError('CCU auth: empty session id');
+    }
+    // The CCU returns the sid wrapped in literal '@' chars in some
+    // contexts. Normalise to the bare value; we re-wrap on use.
+    this.sessionId = parsed.result.replace(/^@+|@+$/g, '');
+    this.log.debug('Acquired CCU session (length=%d)', this.sessionId.length);
+    return this.sessionId;
+  }
+
+  // --- HTTP plumbing -----------------------------------------------
+
+  /** POST to /tclrega.exe; renews session once on 401. */
+  private async postRega(body: Buffer): Promise<Buffer> {
+    const sid = await this.ensureSession();
+    try {
+      return await this.postRegaOnce(body, sid);
+    } catch (err) {
+      if (err instanceof RegaError && /HTTP 401/.test(err.message) && this.auth) {
+        this.log.debug('CCU rejected session, renewing');
+        this.invalidateSession();
+        const fresh = await this.ensureSession();
+        return await this.postRegaOnce(body, fresh);
+      }
+      throw err;
+    }
+  }
+
+  private async postRegaOnce(body: Buffer, sid: string | undefined): Promise<Buffer> {
     const port = this.portOverride ?? (this.useTls ? REGA_PORT_HTTPS : REGA_PORT_HTTP);
+    const path = sid ? `/tclrega.exe?sid=@${encodeURIComponent(sid)}@` : '/tclrega.exe';
+    return this.httpRequest(port, path, body, 'text/plain; charset=iso-8859-1');
+  }
+
+  private httpRequest(port: number, path: string, body: Buffer, contentType: string): Promise<Buffer> {
     const reqFn = this.useTls ? httpsRequest : httpRequest;
     const headers: Record<string, string> = {
-      'Content-Type': 'text/plain; charset=iso-8859-1',
+      'Content-Type': contentType,
       'Content-Length': String(body.length),
     };
-    if (this.auth) {
-      const token = Buffer.from(`${this.auth.username}:${this.auth.password}`).toString('base64');
-      headers['Authorization'] = `Basic ${token}`;
+    const opts: RequestOptions & { rejectUnauthorized?: boolean } = {
+      host: this.host,
+      port,
+      method: 'POST',
+      path,
+      headers,
+      timeout: this.timeoutMs,
+    };
+    if (this.useTls) {
+      // CCU presents a self-signed cert; we accept it but only when the
+      // user explicitly opted into TLS for this host.
+      opts.rejectUnauthorized = false;
     }
 
     return new Promise<Buffer>((resolve, reject) => {
-      const req = reqFn(
-        {
-          host: this.host,
-          port,
-          method: 'POST',
-          path: '/tclrega.exe',
-          headers,
-          // CCU presents a self-signed cert; we accept it but only when the
-          // user explicitly opted into TLS for this host.
-          rejectUnauthorized: false,
-          timeout: this.timeoutMs,
-        },
-        (res: IncomingMessage) => {
-          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-            res.resume();
-            reject(new RegaError(`ReGa HTTP ${res.statusCode ?? 'unknown'}`));
+      const req = reqFn(opts, (res: IncomingMessage) => {
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
+          reject(new RegaError(`ReGa HTTP ${res.statusCode ?? 'unknown'}`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let total = 0;
+        res.on('data', (chunk: Buffer) => {
+          total += chunk.length;
+          if (total > MAX_RESPONSE_BYTES) {
+            res.destroy(new RegaError('ReGa response too large'));
             return;
           }
-          const chunks: Buffer[] = [];
-          let total = 0;
-          res.on('data', (chunk: Buffer) => {
-            total += chunk.length;
-            if (total > MAX_RESPONSE_BYTES) {
-              res.destroy(new RegaError('ReGa response too large'));
-              return;
-            }
-            chunks.push(chunk);
-          });
-          res.on('end', () => resolve(Buffer.concat(chunks)));
-          res.on('error', (err) => reject(new RegaError('ReGa response error', err)));
-        },
-      );
+          chunks.push(chunk);
+        });
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', (err) => reject(new RegaError('ReGa response error', err)));
+      });
       req.on('timeout', () => {
         req.destroy(new RegaError(`ReGa timeout after ${this.timeoutMs} ms`));
       });

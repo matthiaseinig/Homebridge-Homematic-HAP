@@ -1,34 +1,72 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as http from 'node:http';
 import { Buffer } from 'node:buffer';
-import { encode as iconvEncode } from 'iconv-lite';
+import iconv from 'iconv-lite';
+const iconvEncode = iconv.encode.bind(iconv);
 import { isSafeIdentifier, RegaClient } from '../../src/ccu/RegaClient.js';
 import { PrefixedLogger } from '../../src/util/logger.js';
 import { makeLog } from '../helpers/hapStub.js';
 
+interface MockState {
+  lastRegaBody: string;
+  lastRegaPath: string;
+  loginCalls: number;
+  nextRegaResponse: Buffer;
+  nextRegaStatus: number;
+  nextRegaDelay: number;
+  nextLoginPayload: unknown;
+  nextLoginStatus: number;
+  failFirstRegaWith401: boolean;
+  authHeader: string | undefined;
+}
+
 let server: http.Server;
 let port = 0;
-let lastBody = '';
-let nextResponse: Buffer = Buffer.from('');
-let nextStatus = 200;
-let nextDelay = 0;
+let s: MockState;
 
 beforeEach(async () => {
-  lastBody = '';
-  nextResponse = iconvEncode('<xml></xml>', 'ISO-8859-1');
-  nextStatus = 200;
-  nextDelay = 0;
+  s = {
+    lastRegaBody: '',
+    lastRegaPath: '',
+    loginCalls: 0,
+    nextRegaResponse: iconvEncode('<xml></xml>', 'ISO-8859-1'),
+    nextRegaStatus: 200,
+    nextRegaDelay: 0,
+    nextLoginPayload: { version: '1.1', result: '@SID-from-test@', error: null },
+    nextLoginStatus: 200,
+    failFirstRegaWith401: false,
+    authHeader: undefined,
+  };
   server = http.createServer((req, res) => {
+    s.authHeader = req.headers.authorization;
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
-      lastBody = Buffer.concat(chunks).toString('utf8');
+      const url = req.url ?? '/';
+      if (url.startsWith('/api/homematic.cgi')) {
+        s.loginCalls++;
+        res.writeHead(s.nextLoginStatus, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(s.nextLoginPayload));
+        return;
+      }
+      // /tclrega.exe path
+      s.lastRegaBody = Buffer.concat(chunks).toString('utf8');
+      s.lastRegaPath = url;
+      let status = s.nextRegaStatus;
+      if (s.failFirstRegaWith401) {
+        status = 401;
+        s.failFirstRegaWith401 = false;
+      }
       const finish = () => {
-        res.writeHead(nextStatus, { 'Content-Type': 'text/plain; charset=iso-8859-1' });
-        res.end(nextResponse);
+        res.writeHead(status, { 'Content-Type': 'text/plain; charset=iso-8859-1' });
+        if (status >= 400) {
+          res.end('error');
+        } else {
+          res.end(s.nextRegaResponse);
+        }
       };
-      if (nextDelay > 0) {
-        setTimeout(finish, nextDelay);
+      if (s.nextRegaDelay > 0) {
+        setTimeout(finish, s.nextRegaDelay);
       } else {
         finish();
       }
@@ -46,6 +84,7 @@ function makeClient(timeoutMs = 1000, auth?: { username: string; password: strin
   return new RegaClient({
     host: '127.0.0.1',
     port,
+    apiPort: port, // route /api/homematic.cgi through the same mock server
     timeoutMs,
     auth,
     log: new PrefixedLogger(makeLog(), 'rega-test'),
@@ -77,7 +116,7 @@ describe('RegaClient', () => {
   });
 
   it('parses xml + stdout response', async () => {
-    nextResponse = iconvEncode('hello<xml><x>1</x></xml>', 'ISO-8859-1');
+    s.nextRegaResponse = iconvEncode('hello<xml><x>1</x></xml>', 'ISO-8859-1');
     const c = makeClient();
     const result = await c.script('WriteLine("hi");');
     expect(result.stdout).toBe('hello');
@@ -85,7 +124,7 @@ describe('RegaClient', () => {
   });
 
   it('falls back to stdout when no <xml> envelope', async () => {
-    nextResponse = iconvEncode('plain text', 'ISO-8859-1');
+    s.nextRegaResponse = iconvEncode('plain text', 'ISO-8859-1');
     const c = makeClient();
     const result = await c.script('WriteLine("hi");');
     expect(result.xml).toBe('');
@@ -93,7 +132,7 @@ describe('RegaClient', () => {
   });
 
   it('decodes ISO-8859-1', async () => {
-    nextResponse = iconvEncode('Köpenick<xml></xml>', 'ISO-8859-1');
+    s.nextRegaResponse = iconvEncode('Köpenick<xml></xml>', 'ISO-8859-1');
     const c = makeClient();
     expect((await c.script('x')).stdout).toBe('Köpenick');
   });
@@ -108,15 +147,15 @@ describe('RegaClient', () => {
   it('renders bool, number and string literals safely', async () => {
     const c = makeClient();
     await c.setVariable('Foo', true);
-    expect(lastBody).toContain('.State(true)');
+    expect(s.lastRegaBody).toContain('.State(true)');
     await c.setVariable('Foo', false);
-    expect(lastBody).toContain('.State(false)');
+    expect(s.lastRegaBody).toContain('.State(false)');
     await c.setVariable('Foo', 12.5);
-    expect(lastBody).toContain('.State(12.5)');
+    expect(s.lastRegaBody).toContain('.State(12.5)');
     await c.setVariable('Foo', 'he"llo');
-    expect(lastBody).toContain('.State("he\\"llo")');
+    expect(s.lastRegaBody).toContain('.State("he\\"llo")');
     await c.setVariable('Foo', 'a\\b');
-    expect(lastBody).toContain('.State("a\\\\b")');
+    expect(s.lastRegaBody).toContain('.State("a\\\\b")');
   });
 
   it('rejects non-finite numbers', async () => {
@@ -127,40 +166,92 @@ describe('RegaClient', () => {
   it('runProgram emits ProgramExecute', async () => {
     const c = makeClient();
     await c.runProgram('Wake up');
-    expect(lastBody).toContain('ProgramExecute');
+    expect(s.lastRegaBody).toContain('ProgramExecute');
   });
 
   it('getVariable returns trimmed stdout', async () => {
-    nextResponse = iconvEncode(' 42 \n<xml></xml>', 'ISO-8859-1');
+    s.nextRegaResponse = iconvEncode(' 42 \n<xml></xml>', 'ISO-8859-1');
     const c = makeClient();
     expect(await c.getVariable('Foo')).toBe('42');
   });
 
   it('reports HTTP non-2xx as RegaError', async () => {
-    nextStatus = 500;
+    s.nextRegaStatus = 500;
     const c = makeClient();
     await expect(c.script('x')).rejects.toThrow(/HTTP/);
   });
 
   it('reports timeout', async () => {
-    nextDelay = 500;
+    s.nextRegaDelay = 500;
     const c = makeClient(50);
     await expect(c.script('x')).rejects.toThrow(/timeout|failed/);
   });
+});
 
-  it('emits Authorization header when auth is set', async () => {
-    let capturedHeaders: http.IncomingHttpHeaders = {};
-    server.removeAllListeners('request');
-    server.on('request', (req, res) => {
-      capturedHeaders = req.headers;
-      req.resume();
-      req.on('end', () => {
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=iso-8859-1' });
-        res.end(iconvEncode('<xml></xml>', 'ISO-8859-1'));
-      });
-    });
-    const c = makeClient(1000, { username: 'admin', password: 'hunter2' });
+describe('RegaClient session auth', () => {
+  it('does NOT call /api/homematic.cgi when auth is unconfigured', async () => {
+    const c = makeClient();
     await c.script('x');
-    expect(capturedHeaders.authorization).toMatch(/^Basic /);
+    expect(s.loginCalls).toBe(0);
+    expect(s.lastRegaPath).toBe('/tclrega.exe');
+  });
+
+  it('logs in once and reuses the session id', async () => {
+    const c = makeClient(1000, { username: 'admin', password: 'secret' });
+    await c.script('a');
+    await c.script('b');
+    expect(s.loginCalls).toBe(1);
+    expect(s.lastRegaPath).toMatch(/^\/tclrega\.exe\?sid=@SID-from-test@$/);
+  });
+
+  it('strips wrapper @ chars from the returned sid before re-wrapping', async () => {
+    s.nextLoginPayload = { version: '1.1', result: '@@@bare@@@', error: null };
+    const c = makeClient(1000, { username: 'admin', password: 'secret' });
+    await c.script('a');
+    expect(s.lastRegaPath).toMatch(/^\/tclrega\.exe\?sid=@bare@$/);
+  });
+
+  it('renews the session on 401 and retries the original call once', async () => {
+    s.failFirstRegaWith401 = true;
+    const c = makeClient(1000, { username: 'admin', password: 'secret' });
+    await c.script('a');
+    expect(s.loginCalls).toBe(2);
+  });
+
+  it('surfaces a clear error when login fails', async () => {
+    s.nextLoginPayload = {
+      version: '1.1',
+      result: null,
+      error: { code: 501, message: 'invalid credentials or too many sessions' },
+    };
+    const c = makeClient(1000, { username: 'admin', password: 'wrong' });
+    await expect(c.script('x')).rejects.toThrow(/CCU auth failed.*invalid credentials/);
+  });
+
+  it('rejects malformed JSON responses from /api/homematic.cgi', async () => {
+    s.nextLoginPayload = '{not json' as unknown;
+    const c = makeClient(1000, { username: 'admin', password: 'x' });
+    await expect(c.script('y')).rejects.toThrow(/CCU auth/);
+  });
+
+  it('rejects empty session id', async () => {
+    s.nextLoginPayload = { version: '1.1', result: '', error: null };
+    const c = makeClient(1000, { username: 'admin', password: 'x' });
+    await expect(c.script('y')).rejects.toThrow(/empty session/);
+  });
+
+  it('does NOT send an HTTP Basic Authorization header (CCU uses session ids)', async () => {
+    const c = makeClient(1000, { username: 'admin', password: 'secret' });
+    await c.script('x');
+    expect(s.authHeader).toBeUndefined();
+  });
+
+  it('invalidateSession() forces a fresh login on next call', async () => {
+    const c = makeClient(1000, { username: 'admin', password: 'secret' });
+    await c.script('a');
+    expect(s.loginCalls).toBe(1);
+    c.invalidateSession();
+    await c.script('b');
+    expect(s.loginCalls).toBe(2);
   });
 });
