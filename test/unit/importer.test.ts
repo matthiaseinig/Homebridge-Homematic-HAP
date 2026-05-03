@@ -65,7 +65,10 @@ describe('importConfigJson', () => {
 
   it('reports meta', () => {
     const r = importConfigJson(SAMPLE_CONFIG);
-    expect(r.meta).toEqual({ instanceCount: 1, sourceVersion: '1.2.3', ccuIp: '192.168.1.10' });
+    expect(r.meta.instanceCount).toBe(1);
+    expect(r.meta.sourceVersion).toBe('1.2.3');
+    expect(r.meta.ccuIp).toBe('192.168.1.10');
+    expect(r.meta.instances).toMatchObject({ i1: { name: 'main' } });
   });
 });
 

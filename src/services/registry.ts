@@ -30,7 +30,10 @@ import { smokeService } from './impl/SmokeAccessory.js';
 import { temperatureService } from './impl/TemperatureAccessory.js';
 import { humidityService } from './impl/HumidityAccessory.js';
 import { leakService } from './impl/LeakAccessory.js';
+import { programmableSwitchService } from './impl/ProgrammableSwitchAccessory.js';
+import { doorOpenerService } from './impl/DoorOpenerAccessory.js';
 import { variableSwitchService, variableLightService } from './impl/VariableAccessory.js';
+import { variableNumericSensorService } from './impl/VariableNumericSensorAccessory.js';
 import { programService } from './impl/ProgramAccessory.js';
 
 export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
@@ -44,11 +47,14 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   temperatureService,
   humidityService,
   leakService,
+  programmableSwitchService,
+  doorOpenerService,
 ];
 
 export const VARIABLE_SERVICE_DEFINITIONS: VariableServiceDefinition[] = [
   variableSwitchService,
   variableLightService,
+  variableNumericSensorService,
 ];
 
 export const PROGRAM_SERVICE_DEFINITIONS: ProgramServiceDefinition[] = [

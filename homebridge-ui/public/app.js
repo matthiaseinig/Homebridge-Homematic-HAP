@@ -25,6 +25,8 @@ const state = {
   },
   services: { channelServices: [], variableServices: [] },
   discovered: { devices: [], variables: [], programs: [] },
+  /** Imported child-bridge groups awaiting save (multi-bridge mode). */
+  pendingBridgeBlocks: null,
 };
 
 async function init() {
@@ -321,8 +323,11 @@ function renderPrograms() {
 async function onImport() {
   const fileInput = $('hgui-import-file');
   const pasted = $('hgui-import-paste').value.trim();
+  const multiBridge = $('hgui-import-multibridge').checked;
   $('hgui-import-status').textContent = '';
   $('hgui-import-warnings').innerHTML = '';
+  $('hgui-bridges-summary').innerHTML = '';
+  state.pendingBridgeBlocks = null;
 
   homebridge.showSpinner();
   try {
@@ -338,33 +343,23 @@ async function onImport() {
       return;
     }
 
-    // Merge into the live model.
-    const incomingChannels = new Map(report.channels.map((c) => [c.address, c]));
-    for (const c of state.model.channels) {
-      if (!incomingChannels.has(c.address)) {
-        incomingChannels.set(c.address, c);
-      }
-    }
-    state.model.channels = Array.from(incomingChannels.values());
+    if (multiBridge) {
+      const blocks = await homebridge.request('/split-into-bridges', { report });
+      state.pendingBridgeBlocks = blocks;
+      renderBridgesSummary(blocks);
 
-    const incomingVars = new Map(report.variables.map((v) => [v.name, v]));
-    for (const v of state.model.variables) {
-      if (!incomingVars.has(v.name)) {
-        incomingVars.set(v.name, v);
+      // Show the FIRST block in the on-screen editor for visibility.
+      // The user can pick a different block to inspect via the bridges
+      // summary; on Save we emit ALL blocks to the homebridge config.
+      if (blocks.length > 0) {
+        loadBlockIntoModel(blocks[0]);
       }
-    }
-    state.model.variables = Array.from(incomingVars.values());
-
-    const incomingProgs = new Map(report.programs.map((p) => [p.name, p]));
-    for (const p of state.model.programs) {
-      if (!incomingProgs.has(p.name)) {
-        incomingProgs.set(p.name, p);
+      if (report.meta?.ccuIp && !state.model.ccuIp) {
+        state.model.ccuIp = report.meta.ccuIp;
       }
-    }
-    state.model.programs = Array.from(incomingProgs.values());
-
-    if (report.meta?.ccuIp && !state.model.ccuIp) {
-      state.model.ccuIp = report.meta.ccuIp;
+    } else {
+      // Single-bridge mode: merge as before.
+      mergeReportIntoModel(report);
     }
 
     if (report.warnings.length) {
@@ -375,8 +370,10 @@ async function onImport() {
         '</ul></div>';
     }
 
-    $('hgui-import-status').textContent =
-      `Imported ${report.channels.length} channels, ${report.variables.length} variables, ${report.programs.length} programs.`;
+    const status = multiBridge
+      ? `Imported into ${state.pendingBridgeBlocks.length} child bridges (${report.channels.length} channels, ${report.variables.length} variables, ${report.programs.length} programs total).`
+      : `Imported ${report.channels.length} channels, ${report.variables.length} variables, ${report.programs.length} programs.`;
+    $('hgui-import-status').textContent = status;
     homebridge.toast.success('Import complete — review and Save to apply', 'Import');
 
     renderConfigForm();
@@ -391,18 +388,115 @@ async function onImport() {
   }
 }
 
+function mergeReportIntoModel(report) {
+  const incomingChannels = new Map(report.channels.map((c) => [c.address, c]));
+  for (const c of state.model.channels) {
+    if (!incomingChannels.has(c.address)) {
+      incomingChannels.set(c.address, c);
+    }
+  }
+  state.model.channels = Array.from(incomingChannels.values());
+
+  const incomingVars = new Map(report.variables.map((v) => [v.name, v]));
+  for (const v of state.model.variables) {
+    if (!incomingVars.has(v.name)) {
+      incomingVars.set(v.name, v);
+    }
+  }
+  state.model.variables = Array.from(incomingVars.values());
+
+  const incomingProgs = new Map(report.programs.map((p) => [p.name, p]));
+  for (const p of state.model.programs) {
+    if (!incomingProgs.has(p.name)) {
+      incomingProgs.set(p.name, p);
+    }
+  }
+  state.model.programs = Array.from(incomingProgs.values());
+
+  if (report.meta?.ccuIp && !state.model.ccuIp) {
+    state.model.ccuIp = report.meta.ccuIp;
+  }
+}
+
+function loadBlockIntoModel(block) {
+  state.model.name = block.name;
+  state.model.channels = block.channels;
+  state.model.variables = block.variables;
+  state.model.programs = block.programs;
+}
+
+function renderBridgesSummary(blocks) {
+  const host = $('hgui-bridges-summary');
+  if (!blocks || blocks.length === 0) {
+    host.innerHTML = '';
+    return;
+  }
+  const rows = blocks.map((b, idx) => `
+    <tr>
+      <td><code>${idx + 1}</code></td>
+      <td>${escape(b.name)}</td>
+      <td><code>${escape(b.bridge.username)}</code></td>
+      <td><code>${b.bridge.port}</code></td>
+      <td>${b.channels.length}</td>
+      <td>${b.variables.length}</td>
+      <td>${b.programs.length}</td>
+    </tr>
+  `).join('');
+  host.innerHTML = `
+    <div class="alert alert-info">
+      <strong>${blocks.length} child bridges will be created on Save.</strong>
+      Each runs in its own process with its own HomeKit pairing.
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead><tr><th>#</th><th>Name</th><th>Username</th><th>Port</th><th>Channels</th><th>Vars</th><th>Progs</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function onSave() {
   $('hgui-save-status').textContent = '';
   homebridge.showSpinner();
   try {
-    const blocks = await homebridge.getPluginConfig();
-    const idx = blocks.findIndex((b) => b && b.platform === 'HomematicWithGui');
-    if (idx === -1) {
-      blocks.push(state.model);
-    } else {
-      blocks[idx] = state.model;
+    const existing = await homebridge.getPluginConfig();
+
+    if (state.pendingBridgeBlocks && state.pendingBridgeBlocks.length > 0) {
+      // Multi-bridge mode: replace any existing HomematicWithGui block(s)
+      // with one platform-config block per imported child bridge.
+      const kept = existing.filter((b) => !b || b.platform !== 'HomematicWithGui');
+      const generated = state.pendingBridgeBlocks.map((bb) => ({
+        platform: 'HomematicWithGui',
+        name: bb.name,
+        _bridge: bb.bridge,
+        ccuIp: state.model.ccuIp,
+        useTls: state.model.useTls,
+        interfaces: state.model.interfaces,
+        ccuAuth: state.model.ccuAuth,
+        eventServer: state.model.eventServer,
+        channels: bb.channels,
+        variables: bb.variables,
+        programs: bb.programs,
+      }));
+      const next = [...kept, ...generated];
+      await homebridge.updatePluginConfig(next);
+      await homebridge.savePluginConfig();
+      state.pendingBridgeBlocks = null;
+      $('hgui-bridges-summary').innerHTML = '';
+      $('hgui-save-status').textContent = `✓ Saved ${generated.length} child bridges`;
+      homebridge.toast.success(`Saved ${generated.length} child-bridge platform blocks`, 'Saved');
+      return;
     }
-    await homebridge.updatePluginConfig(blocks);
+
+    // Single-bridge mode (default).
+    const idx = existing.findIndex((b) => b && b.platform === 'HomematicWithGui');
+    if (idx === -1) {
+      existing.push(state.model);
+    } else {
+      existing[idx] = state.model;
+    }
+    await homebridge.updatePluginConfig(existing);
     await homebridge.savePluginConfig();
     $('hgui-save-status').textContent = '✓ Saved';
     homebridge.toast.success('Configuration saved', 'Saved');

@@ -84,11 +84,21 @@
           <textarea id="hgui-import-paste" class="form-control font-monospace" rows="3" placeholder="{ &quot;ccuIP&quot;: &quot;192.168.1.10&quot;, ... }"></textarea>
         </div>
       </div>
+      <div class="form-check mt-3">
+        <input class="form-check-input" type="checkbox" id="hgui-import-multibridge">
+        <label class="form-check-label" for="hgui-import-multibridge">
+          <strong>Create one Homebridge child bridge per hap-homematic instance</strong>
+          <small class="d-block text-muted">
+            Replicates the per-room bridge model from hap-homematic. On Save, the plugin emits one platform block per instance, each with its own <code>_bridge</code> identity. Leave unchecked to merge everything onto a single bridge (recommended for smaller setups).
+          </small>
+        </label>
+      </div>
       <div class="mt-3">
         <button id="hgui-import-btn" class="btn btn-warning">Import</button>
         <span id="hgui-import-status" class="ms-2"></span>
       </div>
       <div id="hgui-import-warnings" class="mt-3"></div>
+      <div id="hgui-bridges-summary" class="mt-3"></div>
     </div>
   </div>
 

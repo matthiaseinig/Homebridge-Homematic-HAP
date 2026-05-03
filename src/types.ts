@@ -57,17 +57,22 @@ export interface ChannelMapping {
   /** Variant within a service, e.g. `Outlet` vs `Switch` for SwitchAccessory. */
   subtype?: string;
   settings?: Record<string, unknown>;
+  /** hap-homematic instance UUID this channel belonged to, when imported. */
+  instance?: string;
 }
 
 export interface VariableMapping {
   name: string;
   service?: string;
+  subtype?: string;
   settings?: Record<string, unknown>;
+  instance?: string;
 }
 
 export interface ProgramMapping {
   name: string;
   settings?: Record<string, unknown>;
+  instance?: string;
 }
 
 /** Shape persisted on `accessory.context`, restored on Homebridge restart. */

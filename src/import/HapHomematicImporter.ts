@@ -9,9 +9,16 @@
  * old plugin's service classes to ours. New name aliases go in
  * `SERVICE_ALIASES`. Anything we can't map produces a warning in the
  * `ImportReport` rather than failing the whole import.
+ *
+ * For users who configured one HAP bridge per hap-homematic *instance*
+ * (typically one bridge per room), `splitReportIntoBridges` converts the
+ * flat report into one Homebridge platform-config block per instance,
+ * each with a deterministic `_bridge: { username, port }` so child-bridge
+ * identity is stable across re-runs of the import.
  */
 
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { list as tarList } from 'tar';
 import type {
@@ -43,7 +50,19 @@ const SERVICE_ALIASES: Record<string, string> = {
   HomeMaticSmokeDetectorAccessory: 'SmokeAccessory',
   HomeMaticLeakSensorAccessory: 'LeakAccessory',
   HomeMaticVariableAccessory: 'VariableSwitchAccessory',
+  HomeMaticVariableNumberSensorAccessory: 'VariableNumericSensorAccessory',
+  HomeMaticVarBasedThermometerAccessory: 'VariableNumericSensorAccessory',
+  HomeMaticPushTheButtonAccessory: 'ProgrammableSwitchAccessory',
+  HomeMaticDoorOpenerAccessory: 'DoorOpenerAccessory',
   HomeMaticProgramAccessory: 'ProgramAccessory',
+};
+
+/** Default subtype for service classes that have meaningful sub-variants. */
+const SERVICE_DEFAULT_SUBTYPE: Record<string, string> = {
+  HomeMaticWindowAccessory: 'window',
+  HomeMaticDoorAccessory: 'door',
+  HomeMaticContactSensorAccessory: 'contact',
+  HomeMaticVarBasedThermometerAccessory: 'temperature',
 };
 
 /** hap-homematic Type setting -> our subtype. */
@@ -64,7 +83,21 @@ export interface ImportReport {
     instanceCount: number;
     sourceVersion?: string;
     ccuIp?: string;
+    instances: Record<string, { name?: string }>;
   };
+}
+
+/** A single Homebridge platform-config block emitted by multi-bridge import. */
+export interface BridgeImportBlock {
+  /** Source instance UUID, kept for traceability. */
+  instanceUuid: string;
+  /** Display name shown in the Home app. */
+  name: string;
+  /** `_bridge` identity for the child-bridge feature. */
+  bridge: { username: string; port: number };
+  channels: ChannelMapping[];
+  variables: VariableMapping[];
+  programs: ProgramMapping[];
 }
 
 export interface HapHomematicConfigShape {
@@ -78,7 +111,7 @@ export interface HapHomematicConfigShape {
     instance?: string;
     [k: string]: unknown;
   }>;
-  instances?: Record<string, { name?: string }>;
+  instances?: Record<string, { name?: string; user?: string; pin?: string; setupID?: string }>;
   version?: string;
 }
 
@@ -116,16 +149,20 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
       continue;
     }
     const mapping = config.mappings?.[address] ?? {};
-    const service = SERVICE_ALIASES[mapping.Service ?? ''] ?? undefined;
+    const sourceService = mapping.Service ?? '';
+    const service = SERVICE_ALIASES[sourceService];
     if (!service) {
-      warnings.push(`Could not map service "${mapping.Service ?? '?'}" for channel ${address} — skipped`);
+      warnings.push(`Could not map service "${sourceService || '?'}" for channel ${address} — skipped`);
       continue;
     }
-    const subtype = mapping.Type ? SUBTYPE_ALIASES[mapping.Type] : undefined;
+    const subtype = mapping.Type
+      ? SUBTYPE_ALIASES[mapping.Type] ?? SERVICE_DEFAULT_SUBTYPE[sourceService]
+      : SERVICE_DEFAULT_SUBTYPE[sourceService];
     channels.push({
       address,
       service,
       subtype,
+      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
       settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance']),
     });
   }
@@ -135,10 +172,16 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
       continue;
     }
     const mapping = config.mappings?.[name] ?? {};
-    const service = SERVICE_ALIASES[mapping.Service ?? ''] ?? undefined;
+    const sourceService = mapping.Service ?? '';
+    const service = SERVICE_ALIASES[sourceService];
+    if (sourceService && !service) {
+      warnings.push(`Could not map variable service "${sourceService}" for "${name}" — kept with default mapping`);
+    }
     variables.push({
       name,
       service,
+      subtype: SERVICE_DEFAULT_SUBTYPE[sourceService],
+      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
       settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance']),
     });
   }
@@ -147,7 +190,11 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
     if (typeof name !== 'string' || name.length === 0) {
       continue;
     }
-    programs.push({ name });
+    const mapping = config.mappings?.[name] ?? {};
+    programs.push({
+      name,
+      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
+    });
   }
 
   return {
@@ -159,6 +206,7 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
       instanceCount: Object.keys(config.instances ?? {}).length,
       sourceVersion: config.version,
       ccuIp: config.ccuIP,
+      instances: config.instances ?? {},
     },
   };
 }
@@ -184,6 +232,80 @@ export function mergeIntoConfig(target: Partial<ResolvedConfig>, report: ImportR
     variables: Array.from(existingVars.values()),
     programs: Array.from(existingProgs.values()),
   };
+}
+
+/**
+ * Split a flat ImportReport into one Homebridge platform block per
+ * hap-homematic instance. Items whose `instance` field is missing or
+ * unknown are folded into the first block (so nothing is silently
+ * dropped). Each block gets a deterministic `_bridge.username` and
+ * `_bridge.port` derived from the instance UUID — re-imports produce
+ * the same identities, which preserves Homebridge child-bridge pairing
+ * across runs.
+ */
+export function splitReportIntoBridges(report: ImportReport): BridgeImportBlock[] {
+  const instances = report.meta.instances ?? {};
+  const uuids = Object.keys(instances);
+
+  if (uuids.length === 0) {
+    return [{
+      instanceUuid: 'default',
+      name: 'HomematicWithGui',
+      bridge: bridgeIdentityFor('default'),
+      channels: [...report.channels],
+      variables: [...report.variables],
+      programs: [...report.programs],
+    }];
+  }
+
+  const blocks = new Map<string, BridgeImportBlock>();
+  for (const uuid of uuids) {
+    blocks.set(uuid, {
+      instanceUuid: uuid,
+      name: instances[uuid]?.name ?? `HomematicWithGui-${uuid.slice(0, 8)}`,
+      bridge: bridgeIdentityFor(uuid),
+      channels: [],
+      variables: [],
+      programs: [],
+    });
+  }
+
+  // Anything we can't trace back to an instance lands in the first block.
+  const fallbackUuid = uuids[0]!;
+  const targetFor = (instance?: string): BridgeImportBlock => {
+    const direct = instance ? blocks.get(instance) : undefined;
+    return direct ?? blocks.get(fallbackUuid)!;
+  };
+  const placeChannel = (m: ChannelMapping): void => { targetFor(m.instance).channels.push(m); };
+  const placeVariable = (m: VariableMapping): void => { targetFor(m.instance).variables.push(m); };
+  const placeProgram = (m: ProgramMapping): void => { targetFor(m.instance).programs.push(m); };
+  report.channels.forEach(placeChannel);
+  report.variables.forEach(placeVariable);
+  report.programs.forEach(placeProgram);
+
+  return Array.from(blocks.values());
+}
+
+/**
+ * Deterministic, locally-administered MAC + port pair from an instance
+ * identifier. The MAC sets the locally-administered + unicast bits so
+ * it never collides with real OUI-assigned NICs. The port is in
+ * 9000..14999 — well clear of the default Homebridge range and unlikely
+ * to clash with common services.
+ */
+export function bridgeIdentityFor(seed: string): { username: string; port: number } {
+  const hash = createHash('sha256').update(seed).digest();
+  const bytes: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    let b = hash[i]!;
+    if (i === 0) {
+      // Force locally-administered (bit 1 set) and unicast (bit 0 cleared).
+      b = (b & 0xfe) | 0x02;
+    }
+    bytes.push(b.toString(16).toUpperCase().padStart(2, '0'));
+  }
+  const port = 9000 + (hash.readUInt16BE(6) % 6000);
+  return { username: bytes.join(':'), port };
 }
 
 // --- internals -------------------------------------------------------

@@ -21,6 +21,7 @@ import {
   importConfigJson,
   ImportError,
   mergeIntoConfig,
+  splitReportIntoBridges,
 } from '../dist/src/import/HapHomematicImporter.js';
 import {
   SERVICE_DEFINITIONS,
@@ -49,6 +50,7 @@ class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
     this.onRequest('/discover', (payload) => this.handleDiscover(payload));
     this.onRequest('/import-backup', (payload) => this.handleImportBackup(payload));
     this.onRequest('/import-config-json', (payload) => this.handleImportConfigJson(payload));
+    this.onRequest('/split-into-bridges', (payload) => this.handleSplitIntoBridges(payload));
 
     this.ready();
   }
@@ -142,6 +144,17 @@ class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
         throw new RequestError(err.message, { status: 400 });
       }
       throw new RequestError(`Import failed: ${err.message}`, { status: 500 });
+    }
+  }
+
+  handleSplitIntoBridges(payload) {
+    if (!payload || typeof payload !== 'object' || !payload.report) {
+      throw new RequestError('Missing report', { status: 400 });
+    }
+    try {
+      return splitReportIntoBridges(payload.report);
+    } catch (err) {
+      throw new RequestError(`Split failed: ${err.message}`, { status: 500 });
     }
   }
 
