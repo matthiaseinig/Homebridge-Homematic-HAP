@@ -1,8 +1,13 @@
 /**
- * Facade over the four lower-level CCU adapters. Owns the lifecycle
- * (connect/disconnect/reconnect), exposes high-level operations to the
- * platform and services, and dispatches inbound events to registered
- * listeners.
+ * Facade over the CCU adapters. Owns the lifecycle (connect / disconnect /
+ * reconnect), exposes high-level operations to the platform and services,
+ * and dispatches inbound events to registered listeners.
+ *
+ * Architecture:
+ *   - control plane: CcuJsonRpcClient (JSON-RPC at /api/homematic.cgi)
+ *     used for discovery, variable I/O, program execution, getValue/setValue.
+ *   - event plane:    EventServer (local XML-RPC) + RpcClient per interface
+ *     for the CCU's push events.
  *
  * Exactly one CcuClient lives per HomematicPlatform instance.
  */
@@ -10,19 +15,8 @@
 import { networkInterfaces } from 'node:os';
 import { EventEmitter } from 'node:events';
 import { EventServer, type ChannelEvent } from './EventServer.js';
-import { RegaClient } from './RegaClient.js';
+import { CcuJsonRpcClient } from './CcuJsonRpcClient.js';
 import { RpcClient, INTERFACE_PORTS } from './RpcClient.js';
-import {
-  parseDevicesXml,
-  parseProgramsXml,
-  parseVariablesXml,
-} from './regaParse.js';
-import {
-  DEVICES_SCRIPT,
-  PROGRAMS_SCRIPT,
-  ROOMS_SCRIPT,
-  VARIABLES_SCRIPT,
-} from './regaScripts.js';
 import type {
   CcuDevice,
   CcuInterfaceId,
@@ -52,7 +46,8 @@ const ENABLED_INTERFACES: ReadonlyArray<{
 ];
 
 export class CcuClient extends EventEmitter {
-  readonly rega: RegaClient;
+  /** Modern JSON-RPC control plane. */
+  readonly api: CcuJsonRpcClient;
   readonly eventServer: EventServer;
   private readonly rpcClients: Map<CcuInterfaceId, RpcClient> = new Map();
   private readonly datapointListeners: Map<string, Set<DatapointListener>> = new Map();
@@ -67,13 +62,13 @@ export class CcuClient extends EventEmitter {
     this.config = opts.config;
     this.log = opts.log;
 
-    this.rega = new RegaClient({
+    this.api = new CcuJsonRpcClient({
       host: this.config.ccuIp,
       useTls: this.config.useTls,
       auth: this.config.ccuAuth.enabled
         ? { username: this.config.ccuAuth.username!, password: this.config.ccuAuth.password! }
         : undefined,
-      log: this.log.child('rega'),
+      log: this.log.child('api'),
     });
 
     this.eventServer = new EventServer({
@@ -138,42 +133,24 @@ export class CcuClient extends EventEmitter {
     }
     this.rpcClients.clear();
     await this.eventServer.stop();
+    this.api.invalidateSession();
   }
 
-  /** Fetches all devices as discovered by the CCU. */
-  async listDevices(): Promise<CcuDevice[]> {
-    const result = await this.rega.script(DEVICES_SCRIPT);
-    return parseDevicesXml(result.xml);
+  /** All devices and their channels (one JSON-RPC call). */
+  listDevices(): Promise<CcuDevice[]> {
+    return this.api.listDevices();
   }
 
-  async listVariables(): Promise<CcuVariable[]> {
-    const result = await this.rega.script(VARIABLES_SCRIPT);
-    return parseVariablesXml(result.xml);
+  listVariables(): Promise<CcuVariable[]> {
+    return this.api.listVariables();
   }
 
-  async listPrograms(): Promise<CcuProgram[]> {
-    const result = await this.rega.script(PROGRAMS_SCRIPT);
-    return parseProgramsXml(result.xml);
+  listPrograms(): Promise<CcuProgram[]> {
+    return this.api.listPrograms();
   }
 
-  async listRooms(): Promise<{ id: string; name: string; channelIds: string[] }[]> {
-    const result = await this.rega.script(ROOMS_SCRIPT);
-    const out: { id: string; name: string; channelIds: string[] }[] = [];
-    const re = /<room>([\s\S]*?)<\/room>/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(result.xml)) !== null) {
-      const room = m[1] ?? '';
-      const id = /<id>([\s\S]*?)<\/id>/.exec(room)?.[1] ?? '';
-      const name = decodeURIComponent((/<name>([\s\S]*?)<\/name>/.exec(room)?.[1] ?? '').replace(/\+/g, ' '));
-      const channelIds: string[] = [];
-      const cre = /<channelId>([\s\S]*?)<\/channelId>/g;
-      let cm: RegExpExecArray | null;
-      while ((cm = cre.exec(room)) !== null) {
-        channelIds.push(cm[1] ?? '');
-      }
-      out.push({ id, name, channelIds });
-    }
-    return out;
+  listRooms(): Promise<{ id: string; name: string; channelIds: string[] }[]> {
+    return this.api.listRooms();
   }
 
   /** Subscribe a callback to a `<interface>.<serial>:<chan>.<datapoint>` address. */
@@ -202,23 +179,38 @@ export class CcuClient extends EventEmitter {
     return false;
   }
 
-  /** Send setValue for a CCU datapoint, picking the right interface client. */
+  /**
+   * Set a CCU datapoint via XML-RPC (the event-plane interface client).
+   * setValue HAS to go through XML-RPC because that's the path the CCU
+   * also pushes events back from — round-trip latency is best there.
+   * Falls back to JSON-RPC `Interface.setValue` if no XML-RPC client is
+   * subscribed for that interface.
+   */
   async setValue(address: string, datapoint: string, value: unknown): Promise<void> {
     const intf = this.interfaceForAddress(address);
     const client = this.rpcClients.get(intf);
-    if (!client) {
-      throw new Error(`No RPC client for interface ${intf}`);
+    if (client) {
+      await client.setValue(address, datapoint, value);
+      return;
     }
-    await client.setValue(address, datapoint, value);
+    // Fall back to JSON-RPC. JSON-RPC's Interface.setValue takes the
+    // address WITHOUT the interface prefix.
+    const bareAddress = stripInterfacePrefix(address);
+    const type = guessJsonRpcType(value);
+    await this.api.setInterfaceValue(intf, bareAddress, datapoint, type, value);
   }
 
+  /**
+   * Read a CCU datapoint. Prefers the XML-RPC interface client (single
+   * round-trip, no auth overhead) and falls back to JSON-RPC.
+   */
   async getValue(address: string, datapoint: string): Promise<unknown> {
     const intf = this.interfaceForAddress(address);
     const client = this.rpcClients.get(intf);
-    if (!client) {
-      throw new Error(`No RPC client for interface ${intf}`);
+    if (client) {
+      return client.getValue(address, datapoint);
     }
-    return client.getValue(address, datapoint);
+    return this.api.getInterfaceValue(intf, stripInterfacePrefix(address), datapoint);
   }
 
   // --- internals -----------------------------------------------------
@@ -292,4 +284,19 @@ export class CcuClient extends EventEmitter {
     }
     return '127.0.0.1';
   }
+}
+
+function stripInterfacePrefix(address: string): string {
+  const dot = address.indexOf('.');
+  return dot === -1 ? address : address.slice(dot + 1);
+}
+
+function guessJsonRpcType(value: unknown): 'boolean' | 'string' | 'integer' | 'double' {
+  if (typeof value === 'boolean') {
+    return 'boolean';
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? 'integer' : 'double';
+  }
+  return 'string';
 }

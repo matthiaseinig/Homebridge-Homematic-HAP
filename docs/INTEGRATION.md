@@ -13,16 +13,37 @@ The plugin only talks to the CCU over the **LAN**. It does not need
 internet access. It does not contact any of the author's servers, send
 analytics, or auto-update.
 
+## CCU user / role
+
+The plugin authenticates to the CCU via the modern JSON-RPC API
+(`/api/homematic.cgi`, `Session.login`). It needs a CCU user account
+with the **Admin** role. *User* role is not enough — the JSON-RPC
+endpoints we call (`Device.listAllDetail`, `SysVar.setBool`, etc.) are
+gated to Admin.
+
+A few things to get right when creating the user:
+
+- **Don't enable Auto-Login on this user.** Auto-Login is an IP-based
+  short-circuit for browser sessions; users configured that way often
+  have no separately-stored password hash that `Session.login` can
+  validate against, and the JSON-RPC API rejects every credential.
+  Create a regular Admin user with a real password.
+- Verify the password works by signing in to the CCU's WebUI in an
+  *incognito* window before pasting it into the plugin config. If the
+  WebUI login succeeds, the JSON-RPC call will too.
+- A dedicated service user (e.g. `homebridge`) is cleaner than reusing
+  the human `admin` account.
+
 ## Network requirements
 
 | Direction | Port | Protocol | Why |
 | --------- | ---- | -------- | --- |
-| Plugin → CCU | 8181 | HTTP    | ReGa scripts (discovery, variables, programs) |
-| Plugin → CCU | 2001 | XML-RPC | BidCos-RF interface (`setValue`, `init`) |
-| Plugin → CCU | 2010 | XML-RPC | HmIP-RF interface |
+| Plugin → CCU | 80 / 443 | JSON-RPC over HTTP(S) | discovery, variables, programs, rooms, getValue/setValue (control plane) |
+| Plugin → CCU | 2001 | XML-RPC | BidCos-RF event subscription + fast `setValue` |
+| Plugin → CCU | 2010 | XML-RPC | HmIP-RF event subscription + fast `setValue` |
 | Plugin → CCU | 2000 | XML-RPC | BidCos-Wired (optional) |
-| Plugin → CCU | 9292 | XML-RPC | Virtual Devices |
-| CCU → Plugin | 9875 (default, configurable) | XML-RPC | inbound event callbacks |
+| Plugin → CCU | 9292 | XML-RPC | VirtualDevices |
+| CCU → Plugin | 9875 (default, configurable) | XML-RPC | inbound push events |
 
 If the CCU and Homebridge are not on the same broadcast domain, you
 need to **set the event-server bind host explicitly** to a routable

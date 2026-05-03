@@ -201,7 +201,7 @@ describe('VariableNumericSensorAccessory', () => {
     const { ctx, accessory } = buildCtx(env, { kind: 'variable', id: 'Outdoor', service: 'VariableNumericSensorAccessory', subtype: 'temperature' });
     const handler = variableNumericSensorService.build(ctx);
     handler.attach({ id: '1', name: 'Outdoor', valuetype: 4, subtype: 0, unit: '°C', value: 18 });
-    vi.spyOn(env.ccu.rega, 'getVariable').mockResolvedValue('22.5');
+    vi.spyOn(env.ccu.api, 'getVariable').mockResolvedValue('22.5');
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     handler.dispose?.();
@@ -212,7 +212,7 @@ describe('VariableNumericSensorAccessory', () => {
     const { ctx } = buildCtx(env, { kind: 'variable', id: 'Outdoor', service: 'VariableNumericSensorAccessory' });
     const handler = variableNumericSensorService.build(ctx);
     handler.attach({ id: '1', name: 'Outdoor', valuetype: 4, subtype: 0, unit: '°C', value: 18 });
-    vi.spyOn(env.ccu.rega, 'getVariable').mockRejectedValue(new Error('boom'));
+    vi.spyOn(env.ccu.api, 'getVariable').mockRejectedValue(new Error('boom'));
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     handler.dispose?.();

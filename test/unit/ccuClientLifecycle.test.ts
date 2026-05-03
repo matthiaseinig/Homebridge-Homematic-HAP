@@ -1,6 +1,6 @@
 /**
- * Covers the start, stop, list-* and watchdog branches of CcuClient by
- * stubbing its event server and rega.script() so we never open sockets.
+ * Covers start/stop/list-* and watchdog branches of CcuClient by stubbing
+ * the JSON-RPC client and the event server so we never open sockets.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -27,56 +27,43 @@ function makeCcu(): CcuClient {
 }
 
 describe('CcuClient list*()', () => {
-  it('listDevices delegates to rega and parses', async () => {
+  it('listDevices delegates to the JSON-RPC client', async () => {
     const ccu = makeCcu();
-    vi.spyOn(ccu.rega, 'script').mockResolvedValue({
-      xml: '<devices><device><address>X.0</address><intfName>HmIP-RF</intfName><channels></channels></device></devices>',
-      stdout: '',
-    });
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([
+      { address: 'HmIP.000123', name: 'X', type: 'T', interface: 'HmIP-RF', channels: [] },
+    ]);
     const devices = await ccu.listDevices();
     expect(devices).toHaveLength(1);
   });
 
-  it('listVariables delegates to rega and parses', async () => {
+  it('listVariables delegates to the JSON-RPC client', async () => {
     const ccu = makeCcu();
-    vi.spyOn(ccu.rega, 'script').mockResolvedValue({
-      xml: '<variables><variable><name>X</name><valuetype>2</valuetype><value>true</value></variable></variables>',
-      stdout: '',
-    });
+    vi.spyOn(ccu.api, 'listVariables').mockResolvedValue([
+      { id: '1', name: 'V', valuetype: 2, subtype: 0, value: true },
+    ]);
     expect((await ccu.listVariables())).toHaveLength(1);
   });
 
-  it('listPrograms delegates to rega and parses', async () => {
+  it('listPrograms delegates to the JSON-RPC client', async () => {
     const ccu = makeCcu();
-    vi.spyOn(ccu.rega, 'script').mockResolvedValue({
-      xml: '<programs><program><id>1</id><name>P</name></program></programs>',
-      stdout: '',
-    });
+    vi.spyOn(ccu.api, 'listPrograms').mockResolvedValue([{ id: '1', name: 'P' }]);
     expect((await ccu.listPrograms())).toHaveLength(1);
   });
 
-  it('listRooms decodes UriEncoded names', async () => {
+  it('listRooms delegates to the JSON-RPC client', async () => {
     const ccu = makeCcu();
-    vi.spyOn(ccu.rega, 'script').mockResolvedValue({
-      xml: '<rooms><room><id>1</id><name>Wohn%20zimmer</name><channels><channelId>10</channelId><channelId>11</channelId></channels></room></rooms>',
-      stdout: '',
-    });
+    vi.spyOn(ccu.api, 'listRooms').mockResolvedValue([
+      { id: '1', name: 'Living', channelIds: ['10', '11'] },
+    ]);
     const rooms = await ccu.listRooms();
-    expect(rooms[0]?.name).toBe('Wohn zimmer');
+    expect(rooms[0]?.name).toBe('Living');
     expect(rooms[0]?.channelIds).toEqual(['10', '11']);
-  });
-
-  it('listRooms returns [] for empty XML', async () => {
-    const ccu = makeCcu();
-    vi.spyOn(ccu.rega, 'script').mockResolvedValue({ xml: '', stdout: '' });
-    expect(await ccu.listRooms()).toEqual([]);
   });
 });
 
 describe('CcuClient start/stop with no enabled interfaces', () => {
   it('start() succeeds without RPC subscriptions and stop() cleans up', async () => {
     const ccu = makeCcu();
-    // Stub the event server start/stop so no actual port is opened
     const start = vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
     const stop = vi.spyOn(ccu.eventServer, 'stop').mockResolvedValue(undefined);
     await ccu.start();
@@ -105,5 +92,22 @@ describe('CcuClient resolveCallbackHost', () => {
     const host = (ccu as unknown as { resolveCallbackHost(): string }).resolveCallbackHost();
     expect(typeof host).toBe('string');
     expect(host.length).toBeGreaterThan(0);
+  });
+});
+
+describe('CcuClient setValue/getValue fallback to JSON-RPC', () => {
+  it('falls back to api.setInterfaceValue when no XML-RPC client is subscribed', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.000123:1', 'STATE', true);
+    expect(spy).toHaveBeenCalledWith('HmIP-RF', '000123:1', 'STATE', 'boolean', true);
+  });
+
+  it('falls back to api.getInterfaceValue when no XML-RPC client is subscribed', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'getInterfaceValue').mockResolvedValue('22.4');
+    const v = await ccu.getValue('HmIP-RF.000123:1', 'ACTUAL_TEMPERATURE');
+    expect(v).toBe('22.4');
+    expect(spy).toHaveBeenCalledWith('HmIP-RF', '000123:1', 'ACTUAL_TEMPERATURE');
   });
 });

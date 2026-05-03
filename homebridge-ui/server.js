@@ -79,10 +79,13 @@ class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
     const log = new PrefixedLogger(new UiLogger(), 'ui:test');
     const ccu = new CcuClient({ config, log });
     try {
-      // Probe with a cheap script — `WriteLine("ok");` returns "ok".
-      const result = await ccu.rega.script('WriteLine("ok");');
-      const ok = result.stdout.trim() === 'ok';
-      return { ok, message: ok ? 'CCU reachable' : `Unexpected response: ${result.stdout}` };
+      // Probe via JSON-RPC — listing interfaces is a cheap, side-effect-free
+      // call that confirms both reachability AND auth.
+      const intfs = await ccu.api.call('Interface.listInterfaces');
+      return {
+        ok: true,
+        message: `CCU reachable (${Array.isArray(intfs) ? intfs.length : '?'} interfaces)`,
+      };
     } catch (err) {
       throw new RequestError(`CCU unreachable: ${err.message}`, { status: 502 });
     } finally {

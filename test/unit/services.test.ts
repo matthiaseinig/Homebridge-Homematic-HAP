@@ -356,9 +356,9 @@ describe('SmokeAccessory edge', () => {
 });
 
 describe('VariableAccessory', () => {
-  it('Switch variant: get/set push to RegaClient', async () => {
+  it('Switch variant: get/set push to CcuJsonRpcClient', async () => {
     const env = makeEnv();
-    const setVar = vi.spyOn(env.ccu.rega, 'setVariable').mockResolvedValue(undefined);
+    const setVar = vi.spyOn(env.ccu.api, 'setVariable').mockResolvedValue(undefined);
     const { ctx, accessory } = buildCtx(env, { kind: 'variable', id: 'V1', service: 'VariableSwitchAccessory' });
     const variable: CcuVariable = { id: '1', name: 'V1', valuetype: 2, subtype: 0, value: false };
     const handler = variableSwitchService.build(ctx);
@@ -371,7 +371,7 @@ describe('VariableAccessory', () => {
 
   it('Light variant respects min/max', async () => {
     const env = makeEnv();
-    const setVar = vi.spyOn(env.ccu.rega, 'setVariable').mockResolvedValue(undefined);
+    const setVar = vi.spyOn(env.ccu.api, 'setVariable').mockResolvedValue(undefined);
     const { ctx, accessory } = buildCtx(env, { kind: 'variable', id: 'V2', service: 'VariableLightAccessory' });
     const variable: CcuVariable = { id: '2', name: 'V2', valuetype: 4, subtype: 0, minValue: 10, maxValue: 90, value: 30 };
     const handler = variableLightService.build(ctx);
@@ -388,7 +388,7 @@ describe('VariableAccessory', () => {
 describe('ProgramAccessory', () => {
   it('On=true triggers runProgram, On=false is a no-op', async () => {
     const env = makeEnv();
-    const runProg = vi.spyOn(env.ccu.rega, 'runProgram').mockResolvedValue(undefined);
+    const runProg = vi.spyOn(env.ccu.api, 'runProgram').mockResolvedValue(undefined);
     const { ctx, accessory } = buildCtx(env, { kind: 'program', id: 'P1', service: 'ProgramAccessory' });
     programService.build(ctx).attach('P1');
     const service = accessory.services[0]!;

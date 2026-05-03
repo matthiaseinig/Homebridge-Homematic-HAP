@@ -20,7 +20,7 @@ class VariableSwitchHandler extends AccessoryBase implements VariableService {
       .onGet(this.wrapGet<boolean>(() => this.value))
       .onSet(this.wrapSet<boolean>(async (v) => {
         this.value = v;
-        await this.ccu.rega.setVariable(this.name, v);
+        await this.ccu.api.setVariable(this.name, v);
       }));
 
     // Variables don't push events, so we poll. Slow cadence: every 60s.
@@ -32,7 +32,7 @@ class VariableSwitchHandler extends AccessoryBase implements VariableService {
 
   private async poll(service: ReturnType<AccessoryBase['getOrAddService']>): Promise<void> {
     try {
-      const text = await this.ccu.rega.getVariable(this.name);
+      const text = await this.ccu.api.getVariable(this.name);
       const v = text === 'true' || text === '1';
       if (v !== this.value) {
         this.value = v;
@@ -77,7 +77,7 @@ class VariableLightHandler extends AccessoryBase implements VariableService {
       .onSet(this.wrapSet<number>(async (v) => {
         const clamped = Math.max(this.min, Math.min(this.max, Math.round(v)));
         this.value = clamped;
-        await this.ccu.rega.setVariable(this.name, clamped);
+        await this.ccu.api.setVariable(this.name, clamped);
       }));
 
     this.pollHandle = setInterval(() => this.poll(service), 60_000);
@@ -88,7 +88,7 @@ class VariableLightHandler extends AccessoryBase implements VariableService {
 
   private async poll(service: ReturnType<AccessoryBase['getOrAddService']>): Promise<void> {
     try {
-      const text = await this.ccu.rega.getVariable(this.name);
+      const text = await this.ccu.api.getVariable(this.name);
       const v = parseFloat(text);
       if (Number.isFinite(v) && v !== this.value) {
         this.value = v;

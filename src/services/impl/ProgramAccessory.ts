@@ -16,7 +16,7 @@ class ProgramHandler extends AccessoryBase implements ProgramService {
           // Programs are stateless triggers; ignore "switch off".
           return;
         }
-        await this.ccu.rega.runProgram(programName);
+        await this.ccu.api.runProgram(programName);
         // Auto-flip back to off after 1s so HomeKit doesn't show "always on".
         setTimeout(() => {
           service.updateCharacteristic(this.Characteristic.On, false);

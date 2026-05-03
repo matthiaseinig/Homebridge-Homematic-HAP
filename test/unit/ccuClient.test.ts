@@ -71,10 +71,16 @@ describe('CcuClient registerListener / event dispatch', () => {
     expect(intfFor('weird.0:1')).toBe('BidCos-RF');
   });
 
-  it('throws when calling setValue without RPC clients', async () => {
+  it('falls back to JSON-RPC when no XML-RPC client is subscribed', async () => {
     const ccu = makeCcu();
-    await expect(ccu.setValue('HmIP.0:1', 'STATE', true)).rejects.toThrow(/No RPC client/);
-    await expect(ccu.getValue('HmIP.0:1', 'STATE')).rejects.toThrow(/No RPC client/);
+    // setValue with no XML-RPC subscriber → goes through api.setInterfaceValue
+    const setSpy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.0:1', 'STATE', true);
+    expect(setSpy).toHaveBeenCalledWith('HmIP-RF', '0:1', 'STATE', 'boolean', true);
+    // getValue likewise
+    const getSpy = vi.spyOn(ccu.api, 'getInterfaceValue').mockResolvedValue('22.4');
+    expect(await ccu.getValue('HmIP-RF.0:1', 'ACTUAL_TEMPERATURE')).toBe('22.4');
+    expect(getSpy).toHaveBeenCalled();
   });
 
   it('isLive returns false with no subscribed clients', () => {

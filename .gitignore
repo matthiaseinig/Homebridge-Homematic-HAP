@@ -44,3 +44,12 @@ target/
 
 # Optional outputs we don't ship
 *.tgz
+*.tar.gz
+
+# Never commit hap-homematic backups (they may contain device serials,
+# variable names, room layouts, even pairing material) or any
+# credential file the developer might have used during testing.
+hap-homematic-backup*
+ccu-credentials*
+*.creds
+.ccu-probe.*

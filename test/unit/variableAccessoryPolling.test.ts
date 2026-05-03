@@ -42,7 +42,7 @@ describe('VariableSwitch poll', () => {
     const handler = variableSwitchService.build(ctx);
     handler.attach(variable);
 
-    const getVar = vi.spyOn(ccu.rega, 'getVariable').mockResolvedValue('true');
+    const getVar = vi.spyOn(ccu.api, 'getVariable').mockResolvedValue('true');
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     expect(getVar).toHaveBeenCalled();
@@ -53,7 +53,7 @@ describe('VariableSwitch poll', () => {
     const { ccu, ctx } = build({ kind: 'variable', id: 'V1', service: 'VariableSwitchAccessory' });
     const handler = variableSwitchService.build(ctx);
     handler.attach({ id: '1', name: 'V1', valuetype: 2, subtype: 0, value: false });
-    vi.spyOn(ccu.rega, 'getVariable').mockRejectedValue(new Error('boom'));
+    vi.spyOn(ccu.api, 'getVariable').mockRejectedValue(new Error('boom'));
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     handler.dispose?.();
@@ -65,7 +65,7 @@ describe('VariableLight poll', () => {
     const { ccu, ctx } = build({ kind: 'variable', id: 'V2', service: 'VariableLightAccessory' });
     const handler = variableLightService.build(ctx);
     handler.attach({ id: '2', name: 'V2', valuetype: 4, subtype: 0, minValue: 0, maxValue: 100, value: 30 });
-    const getVar = vi.spyOn(ccu.rega, 'getVariable').mockResolvedValue('55');
+    const getVar = vi.spyOn(ccu.api, 'getVariable').mockResolvedValue('55');
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     expect(getVar).toHaveBeenCalled();
@@ -76,7 +76,7 @@ describe('VariableLight poll', () => {
     const { ccu, ctx } = build({ kind: 'variable', id: 'V2', service: 'VariableLightAccessory' });
     const handler = variableLightService.build(ctx);
     handler.attach({ id: '2', name: 'V2', valuetype: 4, subtype: 0, value: 30 });
-    vi.spyOn(ccu.rega, 'getVariable').mockResolvedValue('NaN');
+    vi.spyOn(ccu.api, 'getVariable').mockResolvedValue('NaN');
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     handler.dispose?.();
@@ -86,7 +86,7 @@ describe('VariableLight poll', () => {
     const { ccu, ctx } = build({ kind: 'variable', id: 'V2', service: 'VariableLightAccessory' });
     const handler = variableLightService.build(ctx);
     handler.attach({ id: '2', name: 'V2', valuetype: 4, subtype: 0, value: 30 });
-    vi.spyOn(ccu.rega, 'getVariable').mockRejectedValue(new Error('nope'));
+    vi.spyOn(ccu.api, 'getVariable').mockRejectedValue(new Error('nope'));
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.runOnlyPendingTimersAsync();
     handler.dispose?.();
@@ -96,7 +96,7 @@ describe('VariableLight poll', () => {
 describe('Program timer auto-flips off', () => {
   it('updates On to false after 1s', async () => {
     const { ccu, ctx, accessory } = build({ kind: 'program', id: 'P', service: 'ProgramAccessory' });
-    vi.spyOn(ccu.rega, 'runProgram').mockResolvedValue(undefined);
+    vi.spyOn(ccu.api, 'runProgram').mockResolvedValue(undefined);
     const { programService } = await import('../../src/services/impl/ProgramAccessory.js');
     const handler = programService.build(ctx);
     handler.attach('P');

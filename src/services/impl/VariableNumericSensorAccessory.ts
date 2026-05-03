@@ -93,7 +93,7 @@ class VariableNumericSensorHandler extends AccessoryBase implements VariableServ
     charType: ReturnType<VariableNumericSensorHandler['characteristicFor']>,
   ): Promise<void> {
     try {
-      const text = await this.ccu.rega.getVariable(this.name);
+      const text = await this.ccu.api.getVariable(this.name);
       const v = toFiniteNumber(text);
       if (v !== undefined && v !== this.value) {
         this.value = v;
