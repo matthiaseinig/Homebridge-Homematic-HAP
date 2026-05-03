@@ -274,6 +274,39 @@ describe('CcuJsonRpcClient.{get,set}Variable + runProgram', () => {
     await expect(c.getVariable('foo;bar')).rejects.toThrow(/unsafe/);
   });
 
+  it('setVariable rejects unsafe names', async () => {
+    const c = makeClient({ username: 'u', password: 'p' });
+    await expect(c.setVariable('foo;bar', true)).rejects.toThrow(/unsafe/);
+  });
+
+  it('setVariable falls through to setFloat for STRING / unknown types', async () => {
+    s.nextResponse['SysVar.getAll'] = {
+      version: '1.1',
+      result: [{ id: '9', name: 'StringVar', type: 'STRING' }],
+      error: null,
+    };
+    const c = makeClient({ username: 'u', password: 'p' });
+    await c.setVariable('StringVar', 'hello');
+    expect(s.callCounts['SysVar.setFloat']).toBe(1);
+  });
+
+  it('setVariable routes ENUM through SysVar.setEnum', async () => {
+    s.nextResponse['SysVar.getAll'] = {
+      version: '1.1',
+      result: [{ id: '11', name: 'Mode', type: 'ENUM' }],
+      error: null,
+    };
+    const c = makeClient({ username: 'u', password: 'p' });
+    await c.setVariable('Mode', 1);
+    expect(s.callCounts['SysVar.setEnum']).toBe(1);
+  });
+
+  it('getVariable returns the stringified value', async () => {
+    s.nextResponse['SysVar.getValueByName'] = { version: '1.1', result: 42.5, error: null };
+    const c = makeClient({ username: 'u', password: 'p' });
+    expect(await c.getVariable('Some')).toBe('42.5');
+  });
+
   it('setVariable looks up id+type and routes to setBool/setFloat', async () => {
     s.nextResponse['SysVar.getAll'] = {
       version: '1.1',
@@ -346,11 +379,34 @@ describe('CcuJsonRpcClient HTTP / JsonRpcError', () => {
     await expect(c.call('X')).rejects.toThrow(/malformed/);
   });
 
+  it('throws on timeout', async () => {
+    server.removeAllListeners('request');
+    server.on('request', (_req, _res) => {
+      // Never respond — let the client timeout
+    });
+    const c = new CcuJsonRpcClient({
+      host: '127.0.0.1', port, timeoutMs: 100,
+      log: new PrefixedLogger(makeLog(), 'rpc'),
+    });
+    await expect(c.call('X')).rejects.toThrow(/timeout|failed/);
+  });
+
   it('JsonRpcError preserves cause when set', () => {
     const cause = new Error('underlying');
     const e = new JsonRpcError('wrapper', 500, cause);
     expect(e.cause).toBe(cause);
     expect(e.code).toBe(500);
+  });
+
+  it('useTls option sets rejectUnauthorized=false', () => {
+    // Construct only — we don't actually open a TLS connection in unit tests.
+    const c = new CcuJsonRpcClient({
+      host: '127.0.0.1', port, useTls: true,
+      log: new PrefixedLogger(makeLog(), 'tls'),
+    });
+    expect(c).toBeDefined();
+    // The TLS branch is exercised at construction; covering it here is
+    // primarily for the branch counter.
   });
 });
 

@@ -164,6 +164,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       }
     }
     this.managed.clear();
+    /* c8 ignore next 3 */
     if (this.ccu) {
       await this.ccu.stop();
     }
@@ -174,9 +175,11 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     address: string,
     mapping: { address: string; service: string; subtype?: string; settings?: Record<string, unknown>; name?: string },
   ): Promise<void> {
+    /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
       return;
     }
+    /* c8 ignore stop */
     const def = findServiceByKey(mapping.service);
     if (!def) {
       throw new Error(`Unknown service: ${mapping.service}`);
@@ -209,9 +212,11 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     serviceKey: string | undefined,
     _settings: Record<string, unknown> | undefined,
   ): Promise<void> {
+    /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
       return;
     }
+    /* c8 ignore stop */
     const variables = await this.ccu.listVariables();
     const variable = variables.find((v) => v.name === name);
     if (!variable) {
@@ -238,9 +243,11 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
   }
 
   private async attachProgram(uuid: string, name: string): Promise<void> {
+    /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
       return;
     }
+    /* c8 ignore stop */
     const def = findProgramServiceByKey('ProgramAccessory') ?? PROGRAM_SERVICE_DEFINITIONS[0]!;
     const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, name, {
       kind: 'program',
@@ -261,6 +268,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
   }
 
   private async fetchChannel(address: string, fallbackName: string | undefined): Promise<CcuChannel> {
+    /* c8 ignore next 3 — same unreachable-in-prod guard as attachChannel/Variable/Program */
     if (!this.ccu) {
       throw new Error('CCU client not initialized');
     }

@@ -110,4 +110,32 @@ describe('CcuClient setValue/getValue fallback to JSON-RPC', () => {
     expect(v).toBe('22.4');
     expect(spy).toHaveBeenCalledWith('HmIP-RF', '000123:1', 'ACTUAL_TEMPERATURE');
   });
+
+  it('routes integer values through JSON-RPC with type=integer', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.000:1', 'KEY', 42);
+    expect(spy).toHaveBeenCalledWith('HmIP-RF', '000:1', 'KEY', 'integer', 42);
+  });
+
+  it('routes float values through JSON-RPC with type=double', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.000:1', 'LEVEL', 0.75);
+    expect(spy).toHaveBeenCalledWith('HmIP-RF', '000:1', 'LEVEL', 'double', 0.75);
+  });
+
+  it('routes string values through JSON-RPC with type=string', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.000:1', 'TEXT', 'hello');
+    expect(spy).toHaveBeenCalledWith('HmIP-RF', '000:1', 'TEXT', 'string', 'hello');
+  });
+
+  it('strips interface prefix correctly when address has no dot', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('BARE', 'STATE', true);
+    expect(spy).toHaveBeenCalled();
+  });
 });
