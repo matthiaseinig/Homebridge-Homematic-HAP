@@ -40,7 +40,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "rimraf ./dist && tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && node ./node_modules/typescript/bin/tsc",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
