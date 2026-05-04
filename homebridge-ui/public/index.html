@@ -47,7 +47,14 @@
      and a slightly-lighter dark in dark mode (#2b3035). Gives tiles
      subtle separation from the page background in either theme. */
   .hgui-tile { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
-  .hgui-tile.muted { opacity: 0.6; }
+  /* Mute the textual content of un-configured tiles, but keep the
+     action button (the "+ Add") at full opacity so it's obvious it
+     can be clicked. CSS opacity is multiplicative through the tree,
+     so we dim individual children rather than the whole tile. */
+  .hgui-tile.muted .hgui-tile-name,
+  .hgui-tile.muted .hgui-tile-sub,
+  .hgui-tile.muted .hgui-tile-meta,
+  .hgui-tile.muted .hgui-tile-pills { opacity: 0.6; }
   .hgui-tile-head { display: flex; align-items: flex-start; gap: 0.5rem; }
   .hgui-tile-name { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; word-break: break-word; color: var(--bs-body-color); }
   .hgui-tile-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
