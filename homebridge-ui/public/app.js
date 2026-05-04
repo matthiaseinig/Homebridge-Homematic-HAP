@@ -2,14 +2,23 @@
  * homebridge-homematic-hap custom UI.
  *
  * Vanilla ES module + the global `homebridge` object provided by
- * homebridge-config-ui-x. No framework. Bootstrap 5 + a small Modal
- * helper for dialogs.
+ * homebridge-config-ui-x. Bootstrap 5 CSS is injected by the host;
+ * Bootstrap JS is NOT, so we use class-toggle-only widgets and a
+ * navigation-stack model in place of modals (modals don't reliably
+ * render inside the host iframe).
  *
- * Architecture: a single `state` object owns everything; views read
- * from it and dialogs mutate it. `state.blocks` is an array of
- * platform-config blocks (one per child bridge — index 0 is the main
- * bridge); cross-block fields like the CCU connection live on every
- * block and are kept in sync on save.
+ * Architecture
+ *   - state.blocks: array of platform-config blocks (one per child
+ *     bridge — index 0 is the main bridge).
+ *   - state.view: top-level view (dashboard | channels | … | settings).
+ *   - state.nav: optional sub-view stack pushed on top of the base
+ *     view. Pushing a sub-view (e.g. "edit channel") swaps the body
+ *     until the user pops back. No modals.
+ *   - state.ui: per-view persistent search/filter/sort.
+ *
+ * Two-level save:
+ *   - Sub-view Save buttons commit a single change into state.blocks.
+ *   - Footer "Save configuration" pushes state.blocks to homebridge.
  */
 
 // ---------------------------------------------------------------- helpers
@@ -22,9 +31,9 @@ const sortBy = (arr, fn) => [...arr].sort((a, b) => {
   if (av < bv) return -1; if (av > bv) return 1; return 0;
 });
 
-const PAGE_SIZE = 25;
-
 // ---------------------------------------------------------------- state
+
+const PAGE_SIZE = 30;
 
 const DEFAULT_BLOCK = () => ({
   platform: 'HomematicHap',
@@ -41,236 +50,208 @@ const DEFAULT_BLOCK = () => ({
 });
 
 const state = {
-  /** Active view. */
   view: 'dashboard',
-  /** All HomematicHap platform blocks; index 0 is the "main" bridge. */
+  /** Optional drill-down sub-view (replaces base view body until popped). */
+  nav: [],
   blocks: [DEFAULT_BLOCK()],
-  /** Other (non-HomematicHap) blocks loaded from config, kept untouched. */
   otherBlocks: [],
-  /** Discovered CCU inventory. */
   discovered: { devices: [], variables: [], programs: [], rooms: [] },
-  /** Service catalog returned by /services. */
   services: { channelServices: [], variableServices: [] },
-  /** Per-view UI state. */
   ui: {
-    search: { channels: '', variables: '', programs: '' },
-    page:   { channels: 1, variables: 1, programs: 1 },
-    sort:   { channels: 'name', variables: 'name', programs: 'name' },
-    /** Toggle: show only configured items (default) vs all discovered. */
-    showAll: { channels: false, variables: false, programs: false },
-    /** Group channels by room, when discovered rooms are available. */
-    groupByRoom: false,
+    search: { channels: '', variables: '', programs: '', picker: '' },
+    filter: { channels: 'configured', variables: 'configured', programs: 'configured' }, // configured | all | unconfigured
+    sort:   { channels: 'name', variables: 'name', programs: 'name' },                    // name | address | type | bridge
+    page:   { channels: 1, variables: 1, programs: 1, picker: 1 },
   },
   pluginVersion: 'unknown',
 };
 
-// Build a map of channel address -> { device, channel, room? } for fast lookup.
+// ---------------------------------------------------------------- lookups
+
 function channelLookup() {
   const out = new Map();
-  const roomByChannelId = new Map();
-  for (const r of state.discovered.rooms ?? []) {
-    for (const id of r.channelIds ?? []) roomByChannelId.set(id, r.name);
-  }
   for (const d of state.discovered.devices ?? []) {
-    for (const c of d.channels ?? []) {
-      out.set(c.address, { device: d, channel: c, room: roomByChannelId.get(c.id) });
-    }
+    for (const c of d.channels ?? []) out.set(c.address, { device: d, channel: c });
   }
   return out;
 }
-
 function variableLookup() {
-  const out = new Map();
-  for (const v of state.discovered.variables ?? []) out.set(v.name, v);
-  return out;
+  const m = new Map();
+  for (const v of state.discovered.variables ?? []) m.set(v.name, v);
+  return m;
 }
-
 function programLookup() {
-  const out = new Map();
-  for (const p of state.discovered.programs ?? []) out.set(p.name, p);
-  return out;
+  const m = new Map();
+  for (const p of state.discovered.programs ?? []) m.set(p.name, p);
+  return m;
 }
-
-// All channels across all blocks, with originating bridge index.
 function allChannelsAcrossBridges() {
-  const out = [];
-  for (let bi = 0; bi < state.blocks.length; bi++) {
-    for (const c of state.blocks[bi].channels ?? []) {
-      out.push({ ...c, bridgeIndex: bi });
-    }
-  }
-  return out;
+  return state.blocks.flatMap((b, bi) => (b.channels ?? []).map((c) => ({ ...c, bridgeIndex: bi })));
 }
-
+function allVariablesAcrossBridges() {
+  return state.blocks.flatMap((b, bi) => (b.variables ?? []).map((v) => ({ ...v, bridgeIndex: bi })));
+}
+function allProgramsAcrossBridges() {
+  return state.blocks.flatMap((b, bi) => (b.programs ?? []).map((p) => ({ ...p, bridgeIndex: bi })));
+}
 function totalCount(kind) {
   return state.blocks.reduce((acc, b) => acc + (b[kind]?.length ?? 0), 0);
 }
 
-// ---------------------------------------------------------------- modal helper
-
-let bsModalInstance = null;
-
-function bsModal() {
-  if (!bsModalInstance) {
-    if (typeof window.bootstrap?.Modal !== 'function') {
-      throw new Error('Bootstrap Modal not available — Homebridge UI did not inject it');
-    }
-    bsModalInstance = new window.bootstrap.Modal($('hgui-modal'), { backdrop: 'static' });
-  }
-  return bsModalInstance;
-}
-
-/**
- * Show a modal dialog with the given content. `onOk` is invoked when
- * the primary button is clicked; if it returns/resolves to a truthy
- * value the modal closes, otherwise it stays open (so a validation
- * error can keep the dialog up).
- */
-function openModal({ title, body, okLabel = 'Save', okClass = 'btn-primary', onOk, footerExtra }) {
-  $('hgui-modal-title').textContent = title;
-  const bodyEl = $('hgui-modal-body');
-  bodyEl.innerHTML = '';
-  if (body instanceof Node) {
-    bodyEl.appendChild(body);
-  } else {
-    bodyEl.innerHTML = body || '';
-  }
-  const okBtn = $('hgui-modal-ok');
-  okBtn.textContent = okLabel;
-  okBtn.className = 'btn ' + okClass;
-  // Replace listener (clone to drop old).
-  const fresh = okBtn.cloneNode(true);
-  okBtn.parentNode.replaceChild(fresh, okBtn);
-  fresh.addEventListener('click', async () => {
-    fresh.disabled = true;
-    try {
-      const result = await onOk?.();
-      if (result !== false) bsModal().hide();
-    } finally {
-      fresh.disabled = false;
-    }
-  });
-
-  // Optional extra button (e.g. Delete in edit dialogs).
-  const footer = $('hgui-modal-footer');
-  // Strip any previously-added extras (kept tagged so we don't nuke OK/Cancel).
-  Array.from(footer.querySelectorAll('[data-extra]')).forEach((el) => el.remove());
-  if (footerExtra) {
-    const extra = document.createElement('button');
-    extra.dataset.extra = '1';
-    extra.type = 'button';
-    extra.className = 'btn ' + (footerExtra.className || 'btn-outline-danger');
-    extra.textContent = footerExtra.label;
-    extra.addEventListener('click', async () => {
-      extra.disabled = true;
-      try {
-        const r = await footerExtra.onClick?.();
-        if (r !== false) bsModal().hide();
-      } finally {
-        extra.disabled = false;
-      }
-    });
-    footer.insertBefore(extra, footer.firstChild);
-  }
-
-  bsModal().show();
-}
-
-// ---------------------------------------------------------------- view router
-
-const VIEWS = {
-  dashboard: renderDashboard,
-  channels:  renderChannels,
-  variables: renderVariables,
-  programs:  renderPrograms,
-  bridges:   renderBridges,
-  import:    renderImport,
-  settings:  renderSettings,
-};
+// ---------------------------------------------------------------- nav stack
 
 function navigate(view) {
-  state.view = view in VIEWS ? view : 'dashboard';
-  document.querySelectorAll('.hgui-nav-link').forEach((el) => {
-    el.classList.toggle('active', el.dataset.view === state.view);
-  });
+  state.view = view;
+  state.nav = [];
+  $('hgui-view-select').value = view;
   rerender();
 }
+
+function pushNav(entry) { state.nav.push(entry); rerender(); }
+function popNav() { state.nav.pop(); rerender(); }
 
 function rerender() {
   const host = $('hgui-view-host');
   host.innerHTML = '';
-  VIEWS[state.view](host);
-  // Refresh sidebar counts.
-  $('hgui-app').querySelector('[data-count="channels"]').textContent  = totalCount('channels');
-  $('hgui-app').querySelector('[data-count="variables"]').textContent = totalCount('variables');
-  $('hgui-app').querySelector('[data-count="programs"]').textContent  = totalCount('programs');
-  $('hgui-app').querySelector('[data-count="bridges"]').textContent   = state.blocks.length;
+  if (state.nav.length > 0) {
+    const top = state.nav[state.nav.length - 1];
+    SUBVIEWS[top.kind]?.(host, top.props ?? {});
+    return;
+  }
+  VIEWS[state.view]?.(host);
 }
 
-// ---------------------------------------------------------------- views: dashboard
+// ---------------------------------------------------------------- top-level views
 
-function renderDashboard(host) {
-  const card = (title, value, sub) => `
-    <div class="col-sm-6 col-md-3">
-      <div class="hgui-card">
-        <div class="hgui-meta">${h(title)}</div>
+const VIEWS = {
+  dashboard: viewDashboard,
+  channels:  viewChannels,
+  variables: viewVariables,
+  programs:  viewPrograms,
+  bridges:   viewBridges,
+  import:    viewImport,
+  settings:  viewSettings,
+};
+
+// ---------------------------------------------------------------- dashboard
+
+function viewDashboard(host) {
+  const card = (label, value, sub = '') => `
+    <div class="col-sm-6 col-md-3 d-flex">
+      <div class="hgui-card flex-fill">
+        <div class="hgui-meta">${h(label)}</div>
         <div class="display-6">${h(value)}</div>
-        <div class="hgui-meta">${h(sub || '')}</div>
+        <div class="hgui-meta">${h(sub)}</div>
       </div>
     </div>`;
   const discoveryStatus = state.discovered.devices.length
-    ? `${state.discovered.devices.length} devices, ${state.discovered.variables.length} variables, ${state.discovered.programs.length} programs, ${state.discovered.rooms.length} rooms`
-    : 'No discovery data yet — click "Discover devices" to load from the CCU';
+    ? `${state.discovered.devices.length} devices · ${state.discovered.variables.length} variables · ${state.discovered.programs.length} programs · ${state.discovered.rooms.length} rooms`
+    : 'No discovery data yet — click "Discover" in the header to load from the CCU.';
   host.innerHTML = `
-    <h4 class="mb-3">Dashboard</h4>
+    <h4 class="my-3">Dashboard</h4>
     <div class="row g-3 mb-3">
-      ${card('Configured channels',  totalCount('channels'),  'across all bridges')}
-      ${card('Configured variables', totalCount('variables'), '')}
-      ${card('Configured programs',  totalCount('programs'),  '')}
-      ${card('Bridges',              state.blocks.length,     'main + child bridges')}
+      ${card('Channels',  totalCount('channels'),  'across all bridges')}
+      ${card('Variables', totalCount('variables'), '')}
+      ${card('Programs',  totalCount('programs'),  '')}
+      ${card('Bridges',   state.blocks.length,     'main + child bridges')}
     </div>
     <div class="hgui-card">
       <h6>Discovery</h6>
-      <p class="hgui-meta mb-2">${h(discoveryStatus)}</p>
-      <button class="btn btn-primary btn-sm" data-action="discover">Discover devices</button>
+      <p class="hgui-meta mb-0">${h(discoveryStatus)}</p>
     </div>
     <div class="hgui-card">
       <h6>Quick links</h6>
       <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-outline-primary btn-sm" data-nav="channels">Manage channels →</button>
-        <button class="btn btn-outline-primary btn-sm" data-nav="variables">Manage variables →</button>
-        <button class="btn btn-outline-primary btn-sm" data-nav="bridges">Manage bridges →</button>
-        <button class="btn btn-outline-secondary btn-sm" data-nav="import">Import from hap-homematic →</button>
-        <button class="btn btn-outline-secondary btn-sm" data-nav="settings">Settings →</button>
+        <button class="btn btn-outline-primary btn-sm" data-go="channels">Manage channels →</button>
+        <button class="btn btn-outline-primary btn-sm" data-go="variables">Manage variables →</button>
+        <button class="btn btn-outline-primary btn-sm" data-go="bridges">Manage bridges →</button>
+        <button class="btn btn-outline-secondary btn-sm" data-go="import">Import from hap-homematic →</button>
+        <button class="btn btn-outline-secondary btn-sm" data-go="settings">Settings →</button>
       </div>
     </div>
   `;
-  host.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.nav)));
-  host.querySelectorAll('[data-action="discover"]').forEach((b) => b.addEventListener('click', onDiscover));
+  host.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.go)));
 }
 
-// ---------------------------------------------------------------- views: channels
+// ---------------------------------------------------------------- channels view
 
-function renderChannels(host) {
+function viewChannels(host) {
+  // Build the persistent toolbar + an empty rows host. Crucially we
+  // attach event handlers ONCE here. Subsequent state changes only
+  // call drawChannelRows(), which mutates the rows host — so the
+  // search input never gets recreated, never loses focus.
+  host.innerHTML = `
+    <h4 class="my-3">Channels</h4>
+    <div class="hgui-toolbar">
+      <input type="search" class="form-control" id="hgui-search-channels"
+             placeholder="Search by HomeKit name, CCU name, address, type…"
+             value="${h(state.ui.search.channels)}" />
+      <select class="form-select" id="hgui-filter-channels" title="Filter">
+        <option value="configured">Configured</option>
+        <option value="all">All discovered</option>
+        <option value="unconfigured">Not in HomeKit</option>
+      </select>
+      <select class="form-select" id="hgui-sort-channels" title="Sort by">
+        <option value="name">Sort: HomeKit name</option>
+        <option value="device">Sort: Device name</option>
+        <option value="address">Sort: Address</option>
+        <option value="type">Sort: Channel type</option>
+        <option value="bridge">Sort: Bridge</option>
+      </select>
+      <button class="btn btn-primary ms-auto" id="hgui-add-channel">+ Add channel</button>
+      <span class="hgui-meta" id="hgui-channels-count"></span>
+    </div>
+    <div id="hgui-rows-host"></div>
+    <div id="hgui-pager-host"></div>
+  `;
+  $('hgui-filter-channels').value = state.ui.filter.channels;
+  $('hgui-sort-channels').value   = state.ui.sort.channels;
+
+  $('hgui-search-channels').addEventListener('input', (e) => {
+    state.ui.search.channels = e.target.value;
+    state.ui.page.channels = 1;
+    drawChannelRows();
+  });
+  $('hgui-filter-channels').addEventListener('change', (e) => {
+    state.ui.filter.channels = e.target.value;
+    state.ui.page.channels = 1;
+    drawChannelRows();
+  });
+  $('hgui-sort-channels').addEventListener('change', (e) => {
+    state.ui.sort.channels = e.target.value;
+    drawChannelRows();
+  });
+  $('hgui-add-channel').addEventListener('click', () => {
+    if (!state.discovered.devices.length) {
+      homebridge.toast.warning('Run "Discover" first', 'Add channel'); return;
+    }
+    pushNav({ kind: 'pickChannel' });
+  });
+
+  drawChannelRows();
+}
+
+function drawChannelRows() {
+  const host = $('hgui-rows-host');
+  const pagerHost = $('hgui-pager-host');
+  if (!host) return;
   const cl = channelLookup();
-  const configured = allChannelsAcrossBridges().map((c) => ({
-    ...c, _info: cl.get(c.address) ?? null,
-  }));
-  const search = state.ui.search.channels.trim().toLowerCase();
-  const showAll = state.ui.showAll.channels;
+  const configured = allChannelsAcrossBridges();
+  const configuredByAddr = new Map(configured.map((c) => [c.address, c]));
 
-  // Build the working dataset:
-  //   - "configured" mode (default): shows accessories already in the config.
-  //   - "showAll" mode: shows every discovered channel; configured ones are
-  //     marked so the user can still edit/remove.
+  // Build candidate set based on filter mode.
   let rows;
-  if (showAll && state.discovered.devices.length) {
-    const configuredByAddr = new Map(configured.map((c) => [c.address, c]));
+  const filter = state.ui.filter.channels;
+  if (filter === 'configured') {
+    rows = configured.map((c) => ({ ...c, _info: cl.get(c.address), isConfigured: true }));
+  } else {
+    // 'all' or 'unconfigured' both need discovered data.
     rows = [];
     for (const d of state.discovered.devices) {
       for (const c of d.channels) {
-        const info = { device: d, channel: c, room: cl.get(c.address)?.room };
         const existing = configuredByAddr.get(c.address);
+        const isConfigured = !!existing;
+        if (filter === 'unconfigured' && isConfigured) continue;
         rows.push({
           address: c.address,
           name: existing?.name ?? c.name,
@@ -278,447 +259,420 @@ function renderChannels(host) {
           subtype: existing?.subtype,
           settings: existing?.settings,
           bridgeIndex: existing?.bridgeIndex,
-          isConfigured: !!existing,
-          _info: info,
+          isConfigured,
+          _info: { device: d, channel: c },
         });
       }
     }
-  } else {
-    rows = configured;
   }
 
-  if (search) {
+  // Search.
+  const q = state.ui.search.channels.trim().toLowerCase();
+  if (q) {
     rows = rows.filter((r) => {
-      const haystack = [
-        r.address, r.name, r._info?.device?.name, r._info?.device?.type,
-        r._info?.channel?.type, r._info?.room, r.service, r.subtype,
+      const t = [
+        r.address, r.name, r._info?.channel?.name, r._info?.device?.name,
+        r._info?.device?.type, r._info?.channel?.type, r.service, r.subtype,
       ].filter(Boolean).join(' ').toLowerCase();
-      return haystack.includes(search);
+      return t.includes(q);
     });
   }
 
   // Sort.
-  rows = sortBy(rows, (r) => (r.name ?? r._info?.channel?.name ?? r.address).toLowerCase());
-
-  // Group by room toggle.
-  let grouped = null;
-  if (state.ui.groupByRoom && state.discovered.rooms.length) {
-    grouped = new Map();
-    for (const r of rows) {
-      const key = r._info?.room ?? '— no room —';
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(r);
+  const sortKey = state.ui.sort.channels;
+  rows = sortBy(rows, (r) => {
+    switch (sortKey) {
+      case 'device':  return (r._info?.device?.name ?? '').toLowerCase();
+      case 'address': return r.address.toLowerCase();
+      case 'type':    return (r._info?.channel?.type ?? '').toLowerCase();
+      case 'bridge':  return String(r.bridgeIndex ?? 999);
+      default:        return (r.name ?? r._info?.channel?.name ?? r.address).toLowerCase();
     }
-  }
+  });
 
-  // Pagination (only when not grouped, since groups are short).
+  $('hgui-channels-count').textContent = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`;
+
+  // Pagination.
   let page = state.ui.page.channels;
-  let pageRows = rows;
-  let pageCount = 1;
-  if (!grouped) {
-    pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-    if (page > pageCount) page = state.ui.page.channels = 1;
-    pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (page > pageCount) page = state.ui.page.channels = 1;
+  const slice = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  if (rows.length === 0) {
+    host.innerHTML = `<div class="hgui-empty">No channels match. ${
+      filter === 'configured' && configured.length === 0
+        ? 'Click "+ Add channel" to add one.'
+        : 'Try clearing the search or switching the filter.'}</div>`;
+    pagerHost.innerHTML = '';
+    return;
   }
 
-  host.innerHTML = `
-    <h4 class="mb-3">Channels</h4>
-    <div class="hgui-toolbar">
-      <input type="search" id="hgui-search-channels" class="form-control"
-             placeholder="Search by name, address, type, room…" value="${h(state.ui.search.channels)}" />
-      <button id="hgui-add-channel" class="btn btn-primary">+ Add channel</button>
-      <div class="form-check ms-2">
-        <input class="form-check-input" type="checkbox" id="hgui-channels-showall" ${showAll ? 'checked' : ''} />
-        <label class="form-check-label" for="hgui-channels-showall">Show all discovered</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="hgui-channels-groupByRoom" ${state.ui.groupByRoom ? 'checked' : ''} />
-        <label class="form-check-label" for="hgui-channels-groupByRoom">Group by room</label>
-      </div>
-      <span class="ms-auto hgui-meta">${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}</span>
-    </div>
-    ${rows.length === 0
-      ? '<div class="hgui-empty">No channels match. Try clearing the search, or run discovery and toggle "Show all discovered".</div>'
-      : grouped
-        ? renderGroupedChannelsHTML(grouped)
-        : renderChannelsTableHTML(pageRows)}
-    ${grouped || rows.length === 0 ? '' : renderPagerHTML('channels', page, pageCount)}
-  `;
-
-  // Wiring.
-  $('hgui-search-channels').addEventListener('input', (e) => {
-    state.ui.search.channels = e.target.value;
-    state.ui.page.channels = 1;
-    rerender();
-  });
-  $('hgui-channels-showall').addEventListener('change', (e) => {
-    state.ui.showAll.channels = e.target.checked;
-    rerender();
-  });
-  $('hgui-channels-groupByRoom').addEventListener('change', (e) => {
-    state.ui.groupByRoom = e.target.checked;
-    rerender();
-  });
-  $('hgui-add-channel').addEventListener('click', openAddChannelDialog);
-  host.querySelectorAll('[data-edit-channel]').forEach((b) => {
-    b.addEventListener('click', () => openEditChannelDialog(b.dataset.editChannel));
-  });
-  host.querySelectorAll('[data-add-channel-from-discovery]').forEach((b) => {
-    b.addEventListener('click', () => openAddChannelDialog(b.dataset.addChannelFromDiscovery));
-  });
-  host.querySelectorAll('[data-pager]').forEach((b) => {
-    b.addEventListener('click', () => {
-      const p = parseInt(b.dataset.pager, 10);
-      if (Number.isFinite(p)) { state.ui.page.channels = p; rerender(); }
-    });
-  });
+  host.innerHTML = `<div class="hgui-tiles">${slice.map(channelTileHTML).join('')}</div>`;
+  pagerHost.innerHTML = pagerHTML('channels', page, pageCount);
+  host.querySelectorAll('[data-edit-channel]').forEach((b) =>
+    b.addEventListener('click', () => pushNav({ kind: 'editChannel', props: { address: b.dataset.editChannel, mode: 'edit' } })));
+  host.querySelectorAll('[data-add-from]').forEach((b) =>
+    b.addEventListener('click', () => pushNav({ kind: 'editChannel', props: { address: b.dataset.addFrom, mode: 'add' } })));
+  pagerHost.querySelectorAll('[data-pager]').forEach((b) =>
+    b.addEventListener('click', () => { state.ui.page.channels = parseInt(b.dataset.pager, 10); drawChannelRows(); }));
 }
 
-function renderChannelsTableHTML(rows) {
-  return `
-    <table class="hgui-grid">
-      <thead><tr>
-        <th>HomeKit name</th>
-        <th>CCU name</th>
-        <th>Address / type</th>
-        <th>Service</th>
-        <th>Bridge</th>
-        <th></th>
-      </tr></thead>
-      <tbody>
-        ${rows.map((r) => renderChannelRow(r)).join('')}
-      </tbody>
-    </table>`;
+function effectiveHkName(r) {
+  // Newest imports put the chosen name on `r.name`. Backups taken
+  // before v0.1.5 stashed it under `settings.name` — read that as a
+  // fallback before falling back to the CCU's channel name and the
+  // address. The platform applies the same precedence at runtime.
+  if (typeof r.name === 'string' && r.name.length) return r.name;
+  if (typeof r.settings?.name === 'string' && r.settings.name.length) return r.settings.name;
+  return r._info?.channel?.name || r.address;
 }
 
-function renderGroupedChannelsHTML(grouped) {
-  return Array.from(grouped.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([room, rs]) => `
-      <div class="hgui-card">
-        <h6>${h(room)} <span class="hgui-pill">${rs.length}</span></h6>
-        ${renderChannelsTableHTML(rs)}
-      </div>
-    `).join('');
-}
-
-function renderChannelRow(r) {
+function channelTileHTML(r) {
   const info = r._info;
-  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : '';
   const inHK = r.isConfigured ?? r.service !== undefined;
+  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : null;
+  const hkName = effectiveHkName(r);
+  // Subtitle: prefer device name/type from discovery; if discovery
+  // hasn't run, show a hint so the user knows to click Discover for
+  // the rich data. The address always shows in the meta line.
+  const subtitle = info?.device
+    ? `${h(info.device.name ?? '')}${info.device.type ? ` · ${h(info.device.type)}` : ''}${info.channel?.name && info.channel.name !== hkName ? ` · ch ${h(info.channel.name)}` : ''}`
+    : '<span class="hgui-meta">discovery data not loaded — click "Discover" for device + CCU names</span>';
+  const channelType = info?.channel?.type ?? '';
   return `
-    <tr>
-      <td>${inHK ? `<strong>${h(r.name || info?.channel?.name || r.address)}</strong>` : '<span class="hgui-meta">(not in HomeKit)</span>'}</td>
-      <td>${h(info?.channel?.name ?? '')}<br/><span class="hgui-meta">${h(info?.device?.name ?? '')}</span></td>
-      <td><code>${h(r.address)}</code><br/><span class="hgui-meta">${h(info?.channel?.type ?? '')}</span></td>
-      <td>${h(r.service ?? '—')}${r.subtype ? `<br/><span class="hgui-meta">${h(r.subtype)}</span>` : ''}</td>
-      <td>${h(bridgeName ?? '—')}</td>
-      <td class="hgui-row-actions">
-        ${inHK
-          ? `<button class="btn btn-sm btn-outline-primary" data-edit-channel="${h(r.address)}">Edit</button>`
-          : `<button class="btn btn-sm btn-primary" data-add-channel-from-discovery="${h(r.address)}">+ Add</button>`}
-      </td>
-    </tr>`;
+    <div class="hgui-tile ${inHK ? '' : 'muted'}">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(hkName)}</div>
+        <div class="hgui-tile-actions">
+          ${inHK
+            ? `<button class="btn btn-sm btn-outline-primary" data-edit-channel="${h(r.address)}">Edit</button>`
+            : `<button class="btn btn-sm btn-primary" data-add-from="${h(r.address)}">+ Add</button>`}
+        </div>
+      </div>
+      <div class="hgui-tile-sub">${subtitle}</div>
+      <div class="hgui-tile-meta">${h(r.address)}${channelType ? ` · ${h(channelType)}` : ''}</div>
+      <div class="hgui-tile-pills">
+        ${inHK ? `<span class="hgui-pill primary">${h(r.service ?? '?')}</span>` : '<span class="hgui-pill muted">not in HomeKit</span>'}
+        ${r.subtype ? `<span class="hgui-pill">${h(r.subtype)}</span>` : ''}
+        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+      </div>
+    </div>`;
 }
 
-function renderPagerHTML(kind, page, pageCount) {
+function pagerHTML(kind, page, pageCount) {
   if (pageCount <= 1) return '';
-  const window = [];
-  for (let p = Math.max(1, page - 2); p <= Math.min(pageCount, page + 2); p++) window.push(p);
+  const win = [];
+  for (let p = Math.max(1, page - 2); p <= Math.min(pageCount, page + 2); p++) win.push(p);
   return `
     <div class="hgui-pager">
-      <button class="btn btn-sm btn-outline-secondary" ${page === 1 ? 'disabled' : ''} data-pager="${page - 1}">‹</button>
-      ${window.map((p) => `<button class="btn btn-sm ${p === page ? 'btn-primary' : 'btn-outline-secondary'}" data-pager="${p}">${p}</button>`).join('')}
-      <button class="btn btn-sm btn-outline-secondary" ${page === pageCount ? 'disabled' : ''} data-pager="${page + 1}">›</button>
+      <button class="btn btn-sm btn-outline-secondary" ${page === 1 ? 'disabled' : ''} data-pager="${page - 1}">‹ prev</button>
+      ${win.map((p) => `<button class="btn btn-sm ${p === page ? 'btn-primary' : 'btn-outline-secondary'}" data-pager="${p}">${p}</button>`).join('')}
+      <button class="btn btn-sm btn-outline-secondary" ${page === pageCount ? 'disabled' : ''} data-pager="${page + 1}">next ›</button>
       <span class="ms-2 hgui-meta">page ${page} / ${pageCount}</span>
     </div>`;
 }
 
-// ---------------------------------------------------------------- views: variables
+// ---------------------------------------------------------------- variables view
 
-function renderVariables(host) {
+function viewVariables(host) {
+  host.innerHTML = `
+    <h4 class="my-3">Variables</h4>
+    <div class="hgui-toolbar">
+      <input type="search" class="form-control" id="hgui-search-variables"
+             placeholder="Search variables…" value="${h(state.ui.search.variables)}" />
+      <select class="form-select" id="hgui-filter-variables">
+        <option value="configured">Configured</option>
+        <option value="all">All discovered</option>
+        <option value="unconfigured">Not in HomeKit</option>
+      </select>
+      <select class="form-select" id="hgui-sort-variables">
+        <option value="name">Sort: HomeKit name</option>
+        <option value="ccuname">Sort: CCU name</option>
+        <option value="bridge">Sort: Bridge</option>
+      </select>
+      <button class="btn btn-primary ms-auto" id="hgui-add-variable">+ Add variable</button>
+      <span class="hgui-meta" id="hgui-variables-count"></span>
+    </div>
+    <div id="hgui-rows-host"></div>
+    <div id="hgui-pager-host"></div>
+  `;
+  $('hgui-filter-variables').value = state.ui.filter.variables;
+  $('hgui-sort-variables').value = state.ui.sort.variables;
+  $('hgui-search-variables').addEventListener('input', (e) => { state.ui.search.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
+  $('hgui-filter-variables').addEventListener('change', (e) => { state.ui.filter.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
+  $('hgui-sort-variables').addEventListener('change', (e) => { state.ui.sort.variables = e.target.value; drawVariableRows(); });
+  $('hgui-add-variable').addEventListener('click', () => {
+    if (!state.discovered.variables.length) { homebridge.toast.warning('Run "Discover" first', 'Add variable'); return; }
+    pushNav({ kind: 'pickVariable' });
+  });
+  drawVariableRows();
+}
+
+function drawVariableRows() {
+  const host = $('hgui-rows-host');
+  const pagerHost = $('hgui-pager-host');
+  if (!host) return;
   const vl = variableLookup();
-  const configured = state.blocks.flatMap((b, bi) => (b.variables ?? []).map((v) => ({ ...v, bridgeIndex: bi })));
-  const showAll = state.ui.showAll.variables;
-  let rows = showAll
-    ? state.discovered.variables.map((v) => {
-        const existing = configured.find((c) => c.name === v.name);
-        return {
-          name: v.name, displayName: existing?.displayName, service: existing?.service,
-          settings: existing?.settings, bridgeIndex: existing?.bridgeIndex,
-          isConfigured: !!existing, _info: v,
-        };
-      })
-    : configured.map((c) => ({ ...c, _info: vl.get(c.name) ?? null }));
-
-  const search = state.ui.search.variables.trim().toLowerCase();
-  if (search) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(search));
-  rows = sortBy(rows, (r) => (r.displayName ?? r.name).toLowerCase());
+  const configured = allVariablesAcrossBridges();
+  const configuredByName = new Map(configured.map((v) => [v.name, v]));
+  let rows;
+  const filter = state.ui.filter.variables;
+  if (filter === 'configured') {
+    rows = configured.map((v) => ({ ...v, _info: vl.get(v.name), isConfigured: true }));
+  } else {
+    rows = state.discovered.variables.map((v) => {
+      const existing = configuredByName.get(v.name);
+      return { name: v.name, displayName: existing?.displayName, bridgeIndex: existing?.bridgeIndex, isConfigured: !!existing, _info: v };
+    });
+    if (filter === 'unconfigured') rows = rows.filter((r) => !r.isConfigured);
+  }
+  const q = state.ui.search.variables.trim().toLowerCase();
+  if (q) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(q));
+  const sortKey = state.ui.sort.variables;
+  rows = sortBy(rows, (r) => {
+    switch (sortKey) {
+      case 'ccuname': return r.name.toLowerCase();
+      case 'bridge':  return String(r.bridgeIndex ?? 999);
+      default:        return (r.displayName ?? r.name).toLowerCase();
+    }
+  });
+  $('hgui-variables-count').textContent = `${rows.length} entries`;
 
   let page = state.ui.page.variables;
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   if (page > pageCount) page = state.ui.page.variables = 1;
-  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const slice = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  host.innerHTML = `
-    <h4 class="mb-3">Variables</h4>
-    <div class="hgui-toolbar">
-      <input type="search" id="hgui-search-variables" class="form-control" placeholder="Search…" value="${h(state.ui.search.variables)}" />
-      <button id="hgui-add-variable" class="btn btn-primary">+ Add variable</button>
-      <div class="form-check ms-2">
-        <input class="form-check-input" type="checkbox" id="hgui-variables-showall" ${showAll ? 'checked' : ''} />
-        <label class="form-check-label" for="hgui-variables-showall">Show all discovered</label>
-      </div>
-      <span class="ms-auto hgui-meta">${rows.length} entries</span>
-    </div>
-    ${rows.length === 0
-      ? '<div class="hgui-empty">No variables match.</div>'
-      : `<table class="hgui-grid">
-          <thead><tr><th>HomeKit name</th><th>CCU name</th><th>Type</th><th>Bridge</th><th></th></tr></thead>
-          <tbody>${pageRows.map((r) => renderVariableRow(r)).join('')}</tbody>
-        </table>`}
-    ${renderPagerHTML('variables', page, pageCount)}
-  `;
-  $('hgui-search-variables').addEventListener('input', (e) => {
-    state.ui.search.variables = e.target.value; state.ui.page.variables = 1; rerender();
-  });
-  $('hgui-variables-showall').addEventListener('change', (e) => {
-    state.ui.showAll.variables = e.target.checked; rerender();
-  });
-  $('hgui-add-variable').addEventListener('click', () => openAddVariableDialog());
+  if (rows.length === 0) {
+    host.innerHTML = '<div class="hgui-empty">No variables match.</div>';
+    pagerHost.innerHTML = '';
+    return;
+  }
+  host.innerHTML = `<div class="hgui-tiles">${slice.map(variableTileHTML).join('')}</div>`;
+  pagerHost.innerHTML = pagerHTML('variables', page, pageCount);
   host.querySelectorAll('[data-edit-variable]').forEach((b) =>
-    b.addEventListener('click', () => openEditVariableDialog(b.dataset.editVariable)));
+    b.addEventListener('click', () => pushNav({ kind: 'editVariable', props: { name: b.dataset.editVariable, mode: 'edit' } })));
   host.querySelectorAll('[data-add-variable-from]').forEach((b) =>
-    b.addEventListener('click', () => openAddVariableDialog(b.dataset.addVariableFrom)));
-  host.querySelectorAll('[data-pager]').forEach((b) =>
-    b.addEventListener('click', () => { state.ui.page.variables = parseInt(b.dataset.pager, 10); rerender(); }));
+    b.addEventListener('click', () => pushNav({ kind: 'editVariable', props: { name: b.dataset.addVariableFrom, mode: 'add' } })));
+  pagerHost.querySelectorAll('[data-pager]').forEach((b) =>
+    b.addEventListener('click', () => { state.ui.page.variables = parseInt(b.dataset.pager, 10); drawVariableRows(); }));
 }
 
-function renderVariableRow(r) {
+function variableTileHTML(r) {
   const info = r._info;
   const inHK = r.isConfigured ?? true;
-  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : '';
-  const typeLabel = info ? `valuetype ${info.valuetype}, value ${String(info.value ?? '?')}` : '';
+  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : null;
   return `
-    <tr>
-      <td>${inHK ? `<strong>${h(r.displayName ?? r.name)}</strong>` : '<span class="hgui-meta">(not in HomeKit)</span>'}</td>
-      <td><code>${h(r.name)}</code></td>
-      <td>${h(typeLabel)}</td>
-      <td>${h(bridgeName ?? '—')}</td>
-      <td class="hgui-row-actions">
-        ${inHK
-          ? `<button class="btn btn-sm btn-outline-primary" data-edit-variable="${h(r.name)}">Edit</button>`
-          : `<button class="btn btn-sm btn-primary" data-add-variable-from="${h(r.name)}">+ Add</button>`}
-      </td>
-    </tr>`;
+    <div class="hgui-tile ${inHK ? '' : 'muted'}">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(r.displayName ?? r.name)}</div>
+        <div class="hgui-tile-actions">
+          ${inHK
+            ? `<button class="btn btn-sm btn-outline-primary" data-edit-variable="${h(r.name)}">Edit</button>`
+            : `<button class="btn btn-sm btn-primary" data-add-variable-from="${h(r.name)}">+ Add</button>`}
+        </div>
+      </div>
+      <div class="hgui-tile-sub">CCU variable</div>
+      <div class="hgui-tile-meta">${h(r.name)}${info ? ` · valuetype ${h(info.valuetype)}${info.unit ? ` (${h(info.unit)})` : ''} · current: ${h(String(info.value ?? '?'))}` : ''}</div>
+      <div class="hgui-tile-pills">
+        ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
+        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+      </div>
+    </div>`;
 }
 
-// ---------------------------------------------------------------- views: programs
+// ---------------------------------------------------------------- programs view
 
-function renderPrograms(host) {
+function viewPrograms(host) {
+  host.innerHTML = `
+    <h4 class="my-3">Programs</h4>
+    <div class="hgui-toolbar">
+      <input type="search" class="form-control" id="hgui-search-programs"
+             placeholder="Search programs…" value="${h(state.ui.search.programs)}" />
+      <select class="form-select" id="hgui-filter-programs">
+        <option value="configured">Configured</option>
+        <option value="all">All discovered</option>
+        <option value="unconfigured">Not in HomeKit</option>
+      </select>
+      <select class="form-select" id="hgui-sort-programs">
+        <option value="name">Sort: HomeKit name</option>
+        <option value="ccuname">Sort: CCU name</option>
+        <option value="bridge">Sort: Bridge</option>
+      </select>
+      <button class="btn btn-primary ms-auto" id="hgui-add-program">+ Add program</button>
+      <span class="hgui-meta" id="hgui-programs-count"></span>
+    </div>
+    <div id="hgui-rows-host"></div>
+    <div id="hgui-pager-host"></div>
+  `;
+  $('hgui-filter-programs').value = state.ui.filter.programs;
+  $('hgui-sort-programs').value = state.ui.sort.programs;
+  $('hgui-search-programs').addEventListener('input', (e) => { state.ui.search.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
+  $('hgui-filter-programs').addEventListener('change', (e) => { state.ui.filter.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
+  $('hgui-sort-programs').addEventListener('change', (e) => { state.ui.sort.programs = e.target.value; drawProgramRows(); });
+  $('hgui-add-program').addEventListener('click', () => {
+    if (!state.discovered.programs.length) { homebridge.toast.warning('Run "Discover" first', 'Add program'); return; }
+    pushNav({ kind: 'pickProgram' });
+  });
+  drawProgramRows();
+}
+
+function drawProgramRows() {
+  const host = $('hgui-rows-host');
+  const pagerHost = $('hgui-pager-host');
+  if (!host) return;
   const pl = programLookup();
-  const configured = state.blocks.flatMap((b, bi) => (b.programs ?? []).map((p) => ({ ...p, bridgeIndex: bi })));
-  const showAll = state.ui.showAll.programs;
-  let rows = showAll
-    ? state.discovered.programs.map((p) => {
-        const existing = configured.find((c) => c.name === p.name);
-        return { name: p.name, displayName: existing?.displayName, bridgeIndex: existing?.bridgeIndex, isConfigured: !!existing, _info: p };
-      })
-    : configured.map((c) => ({ ...c, _info: pl.get(c.name) ?? null }));
-
-  const search = state.ui.search.programs.trim().toLowerCase();
-  if (search) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(search));
-  rows = sortBy(rows, (r) => (r.displayName ?? r.name).toLowerCase());
+  const configured = allProgramsAcrossBridges();
+  const configuredByName = new Map(configured.map((p) => [p.name, p]));
+  let rows;
+  const filter = state.ui.filter.programs;
+  if (filter === 'configured') {
+    rows = configured.map((p) => ({ ...p, _info: pl.get(p.name), isConfigured: true }));
+  } else {
+    rows = state.discovered.programs.map((p) => {
+      const existing = configuredByName.get(p.name);
+      return { name: p.name, displayName: existing?.displayName, bridgeIndex: existing?.bridgeIndex, isConfigured: !!existing, _info: p };
+    });
+    if (filter === 'unconfigured') rows = rows.filter((r) => !r.isConfigured);
+  }
+  const q = state.ui.search.programs.trim().toLowerCase();
+  if (q) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(q));
+  const sortKey = state.ui.sort.programs;
+  rows = sortBy(rows, (r) => {
+    switch (sortKey) {
+      case 'ccuname': return r.name.toLowerCase();
+      case 'bridge':  return String(r.bridgeIndex ?? 999);
+      default:        return (r.displayName ?? r.name).toLowerCase();
+    }
+  });
+  $('hgui-programs-count').textContent = `${rows.length} entries`;
 
   let page = state.ui.page.programs;
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   if (page > pageCount) page = state.ui.page.programs = 1;
-  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const slice = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  host.innerHTML = `
-    <h4 class="mb-3">Programs</h4>
-    <div class="hgui-toolbar">
-      <input type="search" id="hgui-search-programs" class="form-control" placeholder="Search…" value="${h(state.ui.search.programs)}" />
-      <button id="hgui-add-program" class="btn btn-primary">+ Add program</button>
-      <div class="form-check ms-2">
-        <input class="form-check-input" type="checkbox" id="hgui-programs-showall" ${showAll ? 'checked' : ''} />
-        <label class="form-check-label" for="hgui-programs-showall">Show all discovered</label>
-      </div>
-      <span class="ms-auto hgui-meta">${rows.length} entries</span>
-    </div>
-    ${rows.length === 0
-      ? '<div class="hgui-empty">No programs match.</div>'
-      : `<table class="hgui-grid">
-          <thead><tr><th>HomeKit name</th><th>CCU name</th><th>Bridge</th><th></th></tr></thead>
-          <tbody>${pageRows.map((r) => renderProgramRow(r)).join('')}</tbody>
-        </table>`}
-    ${renderPagerHTML('programs', page, pageCount)}
-  `;
-  $('hgui-search-programs').addEventListener('input', (e) => {
-    state.ui.search.programs = e.target.value; state.ui.page.programs = 1; rerender();
-  });
-  $('hgui-programs-showall').addEventListener('change', (e) => {
-    state.ui.showAll.programs = e.target.checked; rerender();
-  });
-  $('hgui-add-program').addEventListener('click', () => openAddProgramDialog());
+  if (rows.length === 0) {
+    host.innerHTML = '<div class="hgui-empty">No programs match.</div>';
+    pagerHost.innerHTML = '';
+    return;
+  }
+  host.innerHTML = `<div class="hgui-tiles">${slice.map(programTileHTML).join('')}</div>`;
+  pagerHost.innerHTML = pagerHTML('programs', page, pageCount);
   host.querySelectorAll('[data-edit-program]').forEach((b) =>
-    b.addEventListener('click', () => openEditProgramDialog(b.dataset.editProgram)));
+    b.addEventListener('click', () => pushNav({ kind: 'editProgram', props: { name: b.dataset.editProgram, mode: 'edit' } })));
   host.querySelectorAll('[data-add-program-from]').forEach((b) =>
-    b.addEventListener('click', () => openAddProgramDialog(b.dataset.addProgramFrom)));
-  host.querySelectorAll('[data-pager]').forEach((b) =>
-    b.addEventListener('click', () => { state.ui.page.programs = parseInt(b.dataset.pager, 10); rerender(); }));
+    b.addEventListener('click', () => pushNav({ kind: 'editProgram', props: { name: b.dataset.addProgramFrom, mode: 'add' } })));
+  pagerHost.querySelectorAll('[data-pager]').forEach((b) =>
+    b.addEventListener('click', () => { state.ui.page.programs = parseInt(b.dataset.pager, 10); drawProgramRows(); }));
 }
 
-function renderProgramRow(r) {
+function programTileHTML(r) {
   const inHK = r.isConfigured ?? true;
-  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : '';
+  const bridgeName = r.bridgeIndex !== undefined ? state.blocks[r.bridgeIndex]?.name : null;
   return `
-    <tr>
-      <td>${inHK ? `<strong>${h(r.displayName ?? r.name)}</strong>` : '<span class="hgui-meta">(not in HomeKit)</span>'}</td>
-      <td><code>${h(r.name)}</code></td>
-      <td>${h(bridgeName ?? '—')}</td>
-      <td class="hgui-row-actions">
-        ${inHK
-          ? `<button class="btn btn-sm btn-outline-primary" data-edit-program="${h(r.name)}">Edit</button>`
-          : `<button class="btn btn-sm btn-primary" data-add-program-from="${h(r.name)}">+ Add</button>`}
-      </td>
-    </tr>`;
+    <div class="hgui-tile ${inHK ? '' : 'muted'}">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(r.displayName ?? r.name)}</div>
+        <div class="hgui-tile-actions">
+          ${inHK
+            ? `<button class="btn btn-sm btn-outline-primary" data-edit-program="${h(r.name)}">Edit</button>`
+            : `<button class="btn btn-sm btn-primary" data-add-program-from="${h(r.name)}">+ Add</button>`}
+        </div>
+      </div>
+      <div class="hgui-tile-sub">CCU program</div>
+      <div class="hgui-tile-meta">${h(r.name)}</div>
+      <div class="hgui-tile-pills">
+        ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
+        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+      </div>
+    </div>`;
 }
 
-// ---------------------------------------------------------------- views: bridges
+// ---------------------------------------------------------------- bridges view
 
-function renderBridges(host) {
+function viewBridges(host) {
   host.innerHTML = `
-    <h4 class="mb-3">Bridges</h4>
-    <p class="hgui-meta">Each bridge runs as its own Homebridge child process with its own HomeKit pairing.
-       The "main" bridge is the first entry; child bridges are added below.</p>
+    <h4 class="my-3">Bridges</h4>
     <div class="hgui-toolbar">
-      <button id="hgui-add-bridge" class="btn btn-primary">+ Add child bridge</button>
+      <button class="btn btn-primary ms-auto" id="hgui-add-bridge">+ Add child bridge</button>
     </div>
-    ${state.blocks.map((b, bi) => renderBridgeCard(b, bi)).join('')}
+    <div class="hgui-tiles" id="hgui-bridges-host"></div>
   `;
   $('hgui-add-bridge').addEventListener('click', addChildBridge);
-  host.querySelectorAll('[data-rename-bridge]').forEach((b) => {
-    b.addEventListener('click', () => openRenameBridgeDialog(parseInt(b.dataset.renameBridge, 10)));
-  });
-  host.querySelectorAll('[data-remove-bridge]').forEach((b) => {
-    b.addEventListener('click', () => openRemoveBridgeDialog(parseInt(b.dataset.removeBridge, 10)));
-  });
-  host.querySelectorAll('[data-regen-bridge]').forEach((b) => {
-    b.addEventListener('click', () => regenerateBridgeIdentity(parseInt(b.dataset.regenBridge, 10)));
-  });
+  drawBridges();
 }
 
-function renderBridgeCard(b, bi) {
+function drawBridges() {
+  const host = $('hgui-bridges-host');
+  if (!host) return;
+  host.innerHTML = state.blocks.map(bridgeTileHTML).join('');
+  host.querySelectorAll('[data-rename-bridge]').forEach((b) =>
+    b.addEventListener('click', () => pushNav({ kind: 'editBridge', props: { bridgeIndex: parseInt(b.dataset.renameBridge, 10) } })));
+  host.querySelectorAll('[data-remove-bridge]').forEach((b) =>
+    b.addEventListener('click', () => pushNav({ kind: 'removeBridge', props: { bridgeIndex: parseInt(b.dataset.removeBridge, 10) } })));
+  host.querySelectorAll('[data-regen-bridge]').forEach((b) =>
+    b.addEventListener('click', () => regenerateBridgeIdentity(parseInt(b.dataset.regenBridge, 10))));
+}
+
+function bridgeTileHTML(b, bi) {
   const isMain = bi === 0;
-  const counts = `${(b.channels ?? []).length} ch / ${(b.variables ?? []).length} var / ${(b.programs ?? []).length} prog`;
   return `
-    <div class="hgui-card">
-      <div class="hgui-bridge-card">
-        <div>
-          <strong>${h(b.name)}</strong> ${isMain ? '<span class="hgui-pill">main</span>' : '<span class="hgui-pill">child</span>'}
-          <div class="hgui-meta">${h(counts)}</div>
-          ${b._bridge
-              ? `<div class="hgui-meta">username <code>${h(b._bridge.username)}</code> · port <code>${h(b._bridge.port)}</code></div>`
-              : '<div class="hgui-meta">— no per-bridge identity (uses main bridge) —</div>'}
-        </div>
-        <div class="hgui-row-actions">
+    <div class="hgui-tile hgui-bridge-tile">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(b.name)}</div>
+        <div class="hgui-tile-actions">
           <button class="btn btn-sm btn-outline-primary" data-rename-bridge="${bi}">Rename</button>
-          ${!isMain ? `<button class="btn btn-sm btn-outline-secondary" data-regen-bridge="${bi}">Regenerate identity</button>` : ''}
+          ${!isMain ? `<button class="btn btn-sm btn-outline-secondary" data-regen-bridge="${bi}">Regen identity</button>` : ''}
           ${!isMain ? `<button class="btn btn-sm btn-outline-danger" data-remove-bridge="${bi}">Remove</button>` : ''}
         </div>
+      </div>
+      <div class="hgui-tile-sub">${(b.channels ?? []).length} channels · ${(b.variables ?? []).length} vars · ${(b.programs ?? []).length} progs</div>
+      <div class="hgui-tile-meta">${b._bridge ? `username <code>${h(b._bridge.username)}</code> · port <code>${h(b._bridge.port)}</code>` : '— uses main bridge identity —'}</div>
+      <div class="hgui-tile-pills">
+        ${isMain ? '<span class="hgui-pill primary">main</span>' : '<span class="hgui-pill">child</span>'}
       </div>
     </div>`;
 }
 
 function addChildBridge() {
   const seed = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const block = {
+  const main = state.blocks[0];
+  state.blocks.push({
     ...DEFAULT_BLOCK(),
     name: `HomematicHap (${state.blocks.length})`,
     _bridge: { username: identityUsername(seed), port: identityPort(seed) },
-    // Inherit common settings from main bridge.
-    ccuIp: state.blocks[0].ccuIp,
-    useTls: state.blocks[0].useTls,
-    interfaces: { ...state.blocks[0].interfaces },
-    interfacePorts: { ...state.blocks[0].interfacePorts },
-    ccuAuth: { ...state.blocks[0].ccuAuth },
-    eventServer: { ...state.blocks[0].eventServer },
-  };
-  state.blocks.push(block);
-  rerender();
+    ccuIp: main.ccuIp, useTls: main.useTls,
+    interfaces: { ...main.interfaces }, interfacePorts: { ...main.interfacePorts },
+    ccuAuth: { ...main.ccuAuth }, eventServer: { ...main.eventServer },
+  });
+  pushConfig();
   homebridge.toast.success('Added child bridge', 'Bridges');
+  rerender();
 }
-
-/** Deterministic-looking but random username + port pair. */
+function regenerateBridgeIdentity(bi) {
+  const seed = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  state.blocks[bi]._bridge = { username: identityUsername(seed), port: identityPort(seed) };
+  pushConfig();
+  rerender();
+  homebridge.toast.warning('Identity regenerated — accessories on this bridge need to be re-paired in HomeKit', 'Bridges');
+}
 function identityUsername(seed) {
-  const h = Array.from(seed).reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0xC0FFEE);
-  const bytes = new Array(6).fill(0).map((_, i) => ((h >> (i * 4)) & 0xFF));
-  return bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
+  const hash = Array.from(seed).reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0xC0FFEE);
+  return new Array(6).fill(0).map((_, i) => ((hash >> (i * 4)) & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join(':');
 }
 function identityPort(seed) {
-  const h = Array.from(seed).reduce((a, c) => (a * 131 + c.charCodeAt(0)) | 0, 0xCAFE);
-  return 30000 + (Math.abs(h) % 5000);
+  const hash = Array.from(seed).reduce((a, c) => (a * 131 + c.charCodeAt(0)) | 0, 0xCAFE);
+  return 30000 + (Math.abs(hash) % 5000);
 }
 
-function openRenameBridgeDialog(bi) {
-  const b = state.blocks[bi];
-  const root = document.createElement('div');
-  root.innerHTML = `
-    <div class="hgui-form-row">
-      <label>Bridge name</label>
-      <div><input class="form-control" id="hgui-bridge-name" value="${h(b.name)}" />
-        <div class="hgui-hint">Shown in the Home app and in Homebridge logs.</div></div>
-    </div>`;
-  openModal({
-    title: `Rename bridge: ${b.name}`,
-    body: root,
-    onOk: () => {
-      const v = root.querySelector('#hgui-bridge-name').value.trim();
-      if (!v) { homebridge.toast.warning('Name cannot be empty'); return false; }
-      b.name = v;
-      rerender();
-      homebridge.toast.success('Renamed bridge', 'Bridges');
-    },
-  });
-}
+// ---------------------------------------------------------------- import view
 
-function openRemoveBridgeDialog(bi) {
-  const b = state.blocks[bi];
-  const accs = (b.channels?.length ?? 0) + (b.variables?.length ?? 0) + (b.programs?.length ?? 0);
-  openModal({
-    title: `Remove bridge "${b.name}"?`,
-    body: `<p>This bridge has <strong>${accs}</strong> accessories.
-           Removing it deletes all of them from this configuration. The HomeKit
-           pairing on the bridge becomes orphaned in the Home app — you will
-           need to remove the bridge there too.</p>`,
-    okLabel: 'Remove bridge',
-    okClass: 'btn-danger',
-    onOk: () => {
-      state.blocks.splice(bi, 1);
-      if (state.blocks.length === 0) state.blocks.push(DEFAULT_BLOCK());
-      rerender();
-      homebridge.toast.success('Bridge removed', 'Bridges');
-    },
-  });
-}
-
-function regenerateBridgeIdentity(bi) {
-  const b = state.blocks[bi];
-  const seed = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  b._bridge = { username: identityUsername(seed), port: identityPort(seed) };
-  rerender();
-  homebridge.toast.warning('Identity regenerated — accessories on this bridge will need to be re-paired in HomeKit', 'Bridges');
-}
-
-// ---------------------------------------------------------------- views: import
-
-function renderImport(host) {
+function viewImport(host) {
   host.innerHTML = `
-    <h4 class="mb-3">Import from hap-homematic</h4>
-    <p class="hgui-meta">Upload a hap-homematic <strong>backup tarball</strong> (the .tar.gz produced
-       by the hap-homematic backup screen) or paste a raw <code>config.json</code>.
-       Existing accessories are kept; imported entries are merged on top.</p>
+    <h4 class="my-3">Import from hap-homematic</h4>
+    <p class="hgui-meta">Upload a hap-homematic <strong>backup tarball</strong> (.tar.gz) or paste a raw
+       <code>config.json</code>. Existing accessories are kept; imported entries are merged on top.</p>
     <div class="hgui-card">
       <div class="row g-2">
         <div class="col-md-6">
@@ -734,12 +688,8 @@ function renderImport(host) {
       <div class="form-check mt-3">
         <input class="form-check-input" type="checkbox" id="hgui-import-multibridge" />
         <label class="form-check-label" for="hgui-import-multibridge">
-          <strong>Create one Homebridge child bridge per hap-homematic instance</strong>
-          <small class="d-block hgui-meta">
-            Replicates the per-room bridge model from hap-homematic. On Save, the plugin
-            emits one platform block per instance, each with its own <code>_bridge</code> identity.
-            Leave unchecked to merge everything onto a single bridge.
-          </small>
+          <strong>One Homebridge child bridge per hap-homematic instance</strong>
+          <small class="d-block hgui-meta">Replicates the per-room bridge model from hap-homematic.</small>
         </label>
       </div>
       <div class="mt-3">
@@ -753,12 +703,12 @@ function renderImport(host) {
   $('hgui-import-btn').addEventListener('click', onImport);
 }
 
-// ---------------------------------------------------------------- views: settings
+// ---------------------------------------------------------------- settings view
 
-function renderSettings(host) {
-  const m = state.blocks[0]; // common settings live on the main block
+function viewSettings(host) {
+  const m = state.blocks[0];
   host.innerHTML = `
-    <h4 class="mb-3">Settings</h4>
+    <h4 class="my-3">Settings</h4>
     <div class="hgui-card">
       <h6>CCU connection</h6>
       <div class="row g-2 mb-2">
@@ -812,7 +762,7 @@ function renderSettings(host) {
       <h6>XML-RPC port overrides</h6>
       <p class="hgui-meta">Leave blank to auto-discover ports via <code>Interface.listInterfaces</code>.
          Set explicitly only when the auto-discovered port is not reachable from this host (e.g. blocked by the CCU's firewall).
-         RaspberryMatic's external defaults are <code>32001 / 32010 / 39292</code>; legacy localhost-only defaults are <code>2001 / 2010 / 9292</code>.</p>
+         RaspberryMatic external defaults: <code>32001 / 32010 / 39292</code>; legacy localhost defaults: <code>2001 / 2010 / 9292</code>.</p>
       <div class="row g-2">
         ${[['BidCos-RF','32001'],['HmIP-RF','32010'],['BidCos-Wired','32000'],['VirtualDevices','39292'],['CUxD','8701']]
           .map(([k,ph]) => `
@@ -823,8 +773,7 @@ function renderSettings(host) {
       </div>
     </div>
   `;
-  // Wire up — propagate to ALL blocks since these are common settings.
-  const propagate = (mut) => { for (const b of state.blocks) mut(b); };
+  const propagate = (mut) => { state.blocks.forEach(mut); pushConfig(); };
   $('cf-ccu-ip').addEventListener('input', (e) => propagate((b) => b.ccuIp = e.target.value.trim()));
   $('cf-event-port').addEventListener('input', (e) => propagate((b) => b.eventServer.port = parseInt(e.target.value, 10) || 9875));
   $('cf-tls').addEventListener('change', (e) => propagate((b) => b.useTls = e.target.checked));
@@ -846,111 +795,125 @@ function renderSettings(host) {
   }
 }
 
-// ---------------------------------------------------------------- dialogs: channel
+// ---------------------------------------------------------------- subviews
 
-function openAddChannelDialog(preselectAddress) {
-  if (!state.discovered.devices.length) {
-    homebridge.toast.warning('Run "Discover devices" first', 'Add channel');
-    return;
-  }
-  if (preselectAddress) {
-    const cl = channelLookup();
-    const info = cl.get(preselectAddress);
-    if (info) return openChannelEditor({ mode: 'add', address: preselectAddress, info });
-  }
-  // Step 1: pick a channel from a searchable grid.
-  openChannelPicker();
+const SUBVIEWS = {
+  pickChannel:  subPickChannel,
+  editChannel:  subEditChannel,
+  pickVariable: subPickVariable,
+  editVariable: subEditVariable,
+  pickProgram:  subPickProgram,
+  editProgram:  subEditProgram,
+  editBridge:   subEditBridge,
+  removeBridge: subRemoveBridge,
+};
+
+function subviewHeader(host, title, breadcrumb) {
+  host.innerHTML = `
+    <div class="d-flex align-items-center gap-2 my-3">
+      <button class="btn btn-outline-secondary btn-sm" id="hgui-back">← Back</button>
+      <h5 class="mb-0">${h(title)}</h5>
+      ${breadcrumb ? `<span class="hgui-meta ms-2">${h(breadcrumb)}</span>` : ''}
+    </div>
+    <div id="hgui-sub-body"></div>
+    <div id="hgui-sub-footer" class="hgui-floating-bar"></div>
+  `;
+  $('hgui-back').addEventListener('click', popNav);
 }
 
-function openChannelPicker() {
+// --- pickChannel: searchable picker
+
+function subPickChannel(host) {
+  subviewHeader(host, 'Add channel — pick from CCU');
+  const body = $('hgui-sub-body');
+  body.innerHTML = `
+    <div class="hgui-toolbar">
+      <input type="search" id="hgui-picker-search" class="form-control"
+             placeholder="Search by name, address, type…" autofocus
+             value="${h(state.ui.search.picker)}" />
+      <span class="hgui-meta ms-auto" id="hgui-picker-count"></span>
+    </div>
+    <div id="hgui-picker-host"></div>
+    <div id="hgui-picker-pager"></div>
+  `;
+  $('hgui-picker-search').addEventListener('input', (e) => {
+    state.ui.search.picker = e.target.value;
+    state.ui.page.picker = 1;
+    drawPicker();
+  });
+  drawPicker();
+}
+
+function drawPicker() {
+  const host = $('hgui-picker-host');
+  const pagerHost = $('hgui-picker-pager');
   const cl = channelLookup();
-  const root = document.createElement('div');
+  const configuredByAddr = new Map(allChannelsAcrossBridges().map((c) => [c.address, c]));
   const all = [];
   for (const d of state.discovered.devices) {
-    for (const c of d.channels) {
-      all.push({ device: d, channel: c, room: cl.get(c.address)?.room });
-    }
+    for (const c of d.channels) all.push({ device: d, channel: c });
   }
-  const configuredByAddr = new Map(allChannelsAcrossBridges().map((c) => [c.address, c]));
+  const q = state.ui.search.picker.trim().toLowerCase();
+  let rows = q
+    ? all.filter((x) => `${x.device.name} ${x.device.type} ${x.channel.name} ${x.channel.address} ${x.channel.type}`.toLowerCase().includes(q))
+    : all;
+  rows = sortBy(rows, (x) => `${x.device.name} ${x.channel.address}`.toLowerCase());
 
-  root.innerHTML = `
-    <p class="hgui-meta">Select a channel to add to HomeKit.</p>
-    <input type="search" class="form-control mb-2" id="hgui-picker-search" placeholder="Search by name, address, type, room…" autofocus />
-    <div id="hgui-picker-host" style="max-height: 50vh; overflow-y: auto;"></div>
-    <div id="hgui-picker-pager" class="mt-2"></div>
-  `;
-  let q = '';
-  let p = 1;
+  let page = state.ui.page.picker;
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (page > pageCount) page = state.ui.page.picker = 1;
+  const slice = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const draw = () => {
-    let rows = q
-      ? all.filter((x) => `${x.device.name} ${x.device.type} ${x.channel.name} ${x.channel.address} ${x.channel.type} ${x.room ?? ''}`.toLowerCase().includes(q))
-      : all;
-    rows = sortBy(rows, (x) => (x.device.name + ' ' + x.channel.address).toLowerCase());
-    const pageCount = Math.max(1, Math.ceil(rows.length / 50));
-    if (p > pageCount) p = 1;
-    const slice = rows.slice((p - 1) * 50, p * 50);
-    const host = root.querySelector('#hgui-picker-host');
-    host.innerHTML = `
-      <table class="hgui-grid">
-        <thead><tr><th>Device</th><th>Channel</th><th>Address</th><th>Type</th><th></th></tr></thead>
-        <tbody>
-          ${slice.map((x) => `
-            <tr>
-              <td>${h(x.device.name)}<br/><span class="hgui-meta">${h(x.device.type)}</span></td>
-              <td>${h(x.channel.name)}</td>
-              <td><code>${h(x.channel.address)}</code></td>
-              <td>${h(x.channel.type)}</td>
-              <td class="hgui-row-actions">
-                ${configuredByAddr.has(x.channel.address)
-                  ? '<span class="hgui-pill">already added</span>'
-                  : `<button class="btn btn-sm btn-primary" data-pick="${h(x.channel.address)}">Select</button>`}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    `;
-    const pager = root.querySelector('#hgui-picker-pager');
-    pager.innerHTML = pageCount > 1 ? `
-      <div class="hgui-pager">
-        <button class="btn btn-sm btn-outline-secondary" ${p === 1 ? 'disabled' : ''} data-pp="${p - 1}">‹</button>
-        <span class="mx-2 hgui-meta">${p} / ${pageCount}</span>
-        <button class="btn btn-sm btn-outline-secondary" ${p === pageCount ? 'disabled' : ''} data-pp="${p + 1}">›</button>
-      </div>` : '';
-    host.querySelectorAll('[data-pick]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const info = cl.get(b.dataset.pick);
-        bsModal().hide();
-        // Defer to let modal fully close before opening editor (Bootstrap
-        // doesn't like stacked modals on the same root).
-        setTimeout(() => openChannelEditor({ mode: 'add', address: b.dataset.pick, info }), 250);
-      });
-    });
-    pager.querySelectorAll('[data-pp]').forEach((b) =>
-      b.addEventListener('click', () => { p = parseInt(b.dataset.pp, 10); draw(); }));
-  };
-  draw();
-  root.querySelector('#hgui-picker-search').addEventListener('input', (e) => {
-    q = e.target.value.trim().toLowerCase(); p = 1; draw();
-  });
-  openModal({ title: 'Add channel — pick from CCU', body: root, okLabel: 'Done', onOk: () => true });
+  $('hgui-picker-count').textContent = `${rows.length} candidates`;
+
+  if (rows.length === 0) {
+    host.innerHTML = '<div class="hgui-empty">No channels match.</div>';
+    pagerHost.innerHTML = '';
+    return;
+  }
+  host.innerHTML = `<div class="hgui-tiles">${slice.map((x) => {
+    const isAdded = configuredByAddr.has(x.channel.address);
+    return `
+      <div class="hgui-tile ${isAdded ? 'muted' : ''}">
+        <div class="hgui-tile-head">
+          <div class="hgui-tile-name">${h(x.channel.name || x.channel.address)}</div>
+          <div class="hgui-tile-actions">
+            ${isAdded
+              ? '<span class="hgui-pill warning">already added</span>'
+              : `<button class="btn btn-sm btn-primary" data-pick="${h(x.channel.address)}">Select</button>`}
+          </div>
+        </div>
+        <div class="hgui-tile-sub">${h(x.device.name)} · ${h(x.device.type)}</div>
+        <div class="hgui-tile-meta">${h(x.channel.address)} · ${h(x.channel.type)}</div>
+      </div>`;
+  }).join('')}</div>`;
+  pagerHost.innerHTML = pagerHTML('picker', page, pageCount);
+  host.querySelectorAll('[data-pick]').forEach((b) =>
+    b.addEventListener('click', () => {
+      // Replace the picker on the nav stack with the editor so Back returns
+      // to the channels list rather than the picker.
+      state.nav.pop();
+      state.nav.push({ kind: 'editChannel', props: { address: b.dataset.pick, mode: 'add' } });
+      rerender();
+    }));
+  pagerHost.querySelectorAll('[data-pager]').forEach((b) =>
+    b.addEventListener('click', () => { state.ui.page.picker = parseInt(b.dataset.pager, 10); drawPicker(); }));
 }
 
-function openEditChannelDialog(address) {
+// --- editChannel: form
+
+function subEditChannel(host, props) {
+  const { address, mode } = props;
   const cl = channelLookup();
   const info = cl.get(address);
-  // Find which block holds the entry.
-  let bridgeIndex = -1;
+
+  let bridgeIndex = 0;
   let entry = null;
   for (let bi = 0; bi < state.blocks.length; bi++) {
     const found = state.blocks[bi].channels.find((c) => c.address === address);
     if (found) { bridgeIndex = bi; entry = found; break; }
   }
-  if (!entry) return;
-  openChannelEditor({ mode: 'edit', address, info, entry, bridgeIndex });
-}
 
-function openChannelEditor({ mode, address, info, entry, bridgeIndex }) {
   const candidates = info?.channel
     ? state.services.channelServices.filter((s) => s.channelTypes.includes(info.channel.type))
     : state.services.channelServices;
@@ -962,311 +925,385 @@ function openChannelEditor({ mode, address, info, entry, bridgeIndex }) {
         service: candidates[0]?.key ?? state.services.channelServices[0]?.key ?? 'SwitchAccessory',
         subtype: candidates[0]?.variants?.[0]?.id,
       };
-  let targetBridge = bridgeIndex ?? 0;
+  let target = bridgeIndex;
 
-  const root = document.createElement('div');
-  const renderBody = () => {
+  subviewHeader(host, mode === 'add' ? 'Add channel' : `Edit: ${draft.name || address}`, address);
+  const body = $('hgui-sub-body');
+  const draw = () => {
     const def = state.services.channelServices.find((s) => s.key === draft.service);
     const variants = def?.variants ?? [];
-    root.innerHTML = `
-      <div class="hgui-meta mb-2">
-        <code>${h(address)}</code> · ${h(info?.channel?.type ?? '')} · ${h(info?.device?.name ?? '')}${info?.room ? ` · room ${h(info.room)}` : ''}
-      </div>
-      <div class="hgui-form-row">
-        <label>HomeKit name</label>
-        <div><input class="form-control" id="hgui-c-name" value="${h(draft.name ?? '')}" />
-          <div class="hgui-hint">The name shown in the Home app. Already-paired bridges may keep their original pairing name — this is a HomeKit limitation we can't override.</div></div>
-      </div>
-      <div class="hgui-form-row">
-        <label>Service</label>
-        <div>
-          <select class="form-select" id="hgui-c-service">
-            ${(candidates.length ? candidates : state.services.channelServices).map((s) => `
-              <option value="${h(s.key)}" ${s.key === draft.service ? 'selected' : ''}>${h(s.description)} (${h(s.key)})</option>
-            `).join('')}
-          </select>
-          <div class="hgui-hint">Pick how this channel should appear in HomeKit.</div>
+    body.innerHTML = `
+      <div class="hgui-card">
+        <div class="hgui-meta mb-2">
+          <code>${h(address)}</code>${info?.channel?.type ? ` · ${h(info.channel.type)}` : ''}${info?.device?.name ? ` · ${h(info.device.name)}` : ''}
         </div>
-      </div>
-      ${variants.length ? `
         <div class="hgui-form-row">
-          <label>Variant</label>
+          <label>HomeKit name</label>
           <div>
-            <select class="form-select" id="hgui-c-subtype">
-              ${variants.map((v) => `<option value="${h(v.id)}" ${v.id === draft.subtype ? 'selected' : ''}>${h(v.label)}</option>`).join('')}
-            </select>
-            <div class="hgui-hint">Some services support multiple HomeKit shapes — pick the one that fits.</div>
+            <input class="form-control" id="ec-name" value="${h(draft.name ?? '')}" />
+            <div class="hgui-hint">Shown in the Home app. Already-paired bridges keep their original pairing name in HomeKit — that's a HomeKit limitation we can't override; rename in the Home app too.</div>
           </div>
-        </div>` : ''}
-      <div class="hgui-form-row">
-        <label>Bridge</label>
-        <div>
-          <select class="form-select" id="hgui-c-bridge">
-            ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === targetBridge ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
-          </select>
-          <div class="hgui-hint">Which bridge the accessory lives on. Moving an accessory between bridges re-pairs it in HomeKit.</div>
+        </div>
+        <div class="hgui-form-row">
+          <label>Service</label>
+          <div>
+            <select class="form-select" id="ec-service">
+              ${(candidates.length ? candidates : state.services.channelServices).map((s) =>
+                `<option value="${h(s.key)}" ${s.key === draft.service ? 'selected' : ''}>${h(s.description)} (${h(s.key)})</option>`).join('')}
+            </select>
+            <div class="hgui-hint">${candidates.length ? 'Filtered to services that support this channel type.' : 'No service explicitly supports this channel type — pick the closest match or leave the default.'}</div>
+          </div>
+        </div>
+        ${variants.length ? `
+          <div class="hgui-form-row">
+            <label>Variant</label>
+            <div>
+              <select class="form-select" id="ec-subtype">
+                ${variants.map((v) => `<option value="${h(v.id)}" ${v.id === draft.subtype ? 'selected' : ''}>${h(v.label)}</option>`).join('')}
+              </select>
+              <div class="hgui-hint">Some services support multiple HomeKit shapes — pick the one that fits.</div>
+            </div>
+          </div>` : ''}
+        <div class="hgui-form-row">
+          <label>Bridge</label>
+          <div>
+            <select class="form-select" id="ec-bridge">
+              ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === target ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
+            </select>
+            <div class="hgui-hint">Which Homebridge bridge this accessory lives on. Moving an accessory between bridges re-pairs it in HomeKit.</div>
+          </div>
         </div>
       </div>
     `;
-    root.querySelector('#hgui-c-name').addEventListener('input', (e) => { draft.name = e.target.value; });
-    root.querySelector('#hgui-c-service').addEventListener('change', (e) => {
+    body.querySelector('#ec-name').addEventListener('input', (e) => { draft.name = e.target.value; });
+    body.querySelector('#ec-service').addEventListener('change', (e) => {
       draft.service = e.target.value;
       const newDef = state.services.channelServices.find((s) => s.key === draft.service);
       draft.subtype = newDef?.variants?.[0]?.id;
-      renderBody();
+      draw();
     });
     if (variants.length) {
-      root.querySelector('#hgui-c-subtype').addEventListener('change', (e) => { draft.subtype = e.target.value; });
+      body.querySelector('#ec-subtype').addEventListener('change', (e) => { draft.subtype = e.target.value; });
     }
-    root.querySelector('#hgui-c-bridge').addEventListener('change', (e) => { targetBridge = parseInt(e.target.value, 10); });
+    body.querySelector('#ec-bridge').addEventListener('change', (e) => { target = parseInt(e.target.value, 10); });
   };
-  renderBody();
+  draw();
 
-  openModal({
-    title: mode === 'add' ? 'Add channel' : `Edit ${entry?.name ?? address}`,
-    body: root,
-    okLabel: mode === 'add' ? 'Add' : 'Save',
-    onOk: () => {
-      const name = (draft.name ?? '').trim();
-      if (!name) { homebridge.toast.warning('HomeKit name cannot be empty'); return false; }
-      // Remove any existing entry from any block, then add to target.
+  const footer = $('hgui-sub-footer');
+  footer.innerHTML = `
+    ${mode === 'edit' ? '<button class="btn btn-outline-danger" id="ec-remove">Remove from HomeKit</button>' : ''}
+    <button class="btn btn-secondary ms-auto" id="ec-cancel">Cancel</button>
+    <button class="btn btn-primary" id="ec-save">${mode === 'add' ? 'Add' : 'Save'}</button>
+  `;
+  footer.querySelector('#ec-cancel').addEventListener('click', popNav);
+  footer.querySelector('#ec-save').addEventListener('click', () => {
+    const name = (draft.name ?? '').trim();
+    if (!name) { homebridge.toast.warning('HomeKit name cannot be empty'); return; }
+    for (const b of state.blocks) {
+      const i = b.channels.findIndex((c) => c.address === address);
+      if (i !== -1) b.channels.splice(i, 1);
+    }
+    state.blocks[target].channels.push({
+      address, name, service: draft.service,
+      ...(draft.subtype ? { subtype: draft.subtype } : {}),
+      ...(draft.settings ? { settings: draft.settings } : {}),
+    });
+    pushConfig();
+    homebridge.toast.success(mode === 'add' ? 'Channel added' : 'Channel updated', 'Channels');
+    popNav();
+  });
+  if (mode === 'edit') {
+    footer.querySelector('#ec-remove').addEventListener('click', () => {
       for (const b of state.blocks) {
         const i = b.channels.findIndex((c) => c.address === address);
         if (i !== -1) b.channels.splice(i, 1);
       }
-      state.blocks[targetBridge].channels.push({
-        address,
-        name,
-        service: draft.service,
-        ...(draft.subtype ? { subtype: draft.subtype } : {}),
-        ...(draft.settings ? { settings: draft.settings } : {}),
-      });
-      rerender();
-      homebridge.toast.success(mode === 'add' ? 'Channel added' : 'Channel updated', 'Channels');
-    },
-    footerExtra: mode === 'edit'
-      ? {
-          label: 'Remove from HomeKit',
-          onClick: () => {
-            for (const b of state.blocks) {
-              const i = b.channels.findIndex((c) => c.address === address);
-              if (i !== -1) b.channels.splice(i, 1);
-            }
-            rerender();
-            homebridge.toast.success('Channel removed', 'Channels');
-          },
-        }
-      : null,
-  });
-}
-
-// ---------------------------------------------------------------- dialogs: variable
-
-function openAddVariableDialog(preselectName) {
-  if (!state.discovered.variables.length) {
-    homebridge.toast.warning('Run "Discover devices" first', 'Add variable');
-    return;
-  }
-  if (preselectName) {
-    const v = variableLookup().get(preselectName);
-    if (v) return openVariableEditor({ mode: 'add', name: preselectName, info: v });
-  }
-  // Picker.
-  const root = document.createElement('div');
-  let q = '';
-  const draw = () => {
-    const rows = sortBy(
-      state.discovered.variables.filter((v) => !q || (v.name + ' ' + (v.unit ?? '')).toLowerCase().includes(q)),
-      (v) => v.name.toLowerCase(),
-    );
-    const configured = new Set(state.blocks.flatMap((b) => b.variables.map((v) => v.name)));
-    root.innerHTML = `
-      <input type="search" class="form-control mb-2" id="hgui-vp-q" placeholder="Search variables…" value="${h(q)}" autofocus />
-      <div style="max-height: 50vh; overflow-y: auto;">
-        <table class="hgui-grid">
-          <thead><tr><th>Name</th><th>Type</th><th>Current</th><th></th></tr></thead>
-          <tbody>
-            ${rows.map((v) => `
-              <tr>
-                <td><code>${h(v.name)}</code></td>
-                <td>valuetype ${h(v.valuetype)}${v.unit ? ` (${h(v.unit)})` : ''}</td>
-                <td>${h(String(v.value ?? ''))}</td>
-                <td class="hgui-row-actions">
-                  ${configured.has(v.name)
-                    ? '<span class="hgui-pill">added</span>'
-                    : `<button class="btn btn-sm btn-primary" data-pick-var="${h(v.name)}">Select</button>`}
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
-    root.querySelector('#hgui-vp-q').addEventListener('input', (e) => { q = e.target.value.trim().toLowerCase(); draw(); });
-    root.querySelectorAll('[data-pick-var]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const v = variableLookup().get(b.dataset.pickVar);
-        bsModal().hide();
-        setTimeout(() => openVariableEditor({ mode: 'add', name: v.name, info: v }), 250);
-      });
+      pushConfig();
+      homebridge.toast.success('Channel removed', 'Channels');
+      popNav();
     });
-  };
-  draw();
-  openModal({ title: 'Add variable — pick from CCU', body: root, okLabel: 'Done', onOk: () => true });
+  }
 }
 
-function openEditVariableDialog(name) {
+// --- pickVariable / editVariable
+
+function subPickVariable(host) {
+  subviewHeader(host, 'Add variable — pick from CCU');
+  const body = $('hgui-sub-body');
+  body.innerHTML = `
+    <div class="hgui-toolbar">
+      <input type="search" id="hgui-picker-search" class="form-control" placeholder="Search variables…"
+             value="${h(state.ui.search.picker)}" autofocus />
+      <span class="hgui-meta ms-auto" id="hgui-picker-count"></span>
+    </div>
+    <div id="hgui-picker-host"></div>
+  `;
+  $('hgui-picker-search').addEventListener('input', (e) => { state.ui.search.picker = e.target.value; drawVariablePicker(); });
+  drawVariablePicker();
+}
+function drawVariablePicker() {
+  const host = $('hgui-picker-host');
+  const configured = new Set(state.blocks.flatMap((b) => b.variables.map((v) => v.name)));
+  const q = state.ui.search.picker.trim().toLowerCase();
+  let rows = state.discovered.variables;
+  if (q) rows = rows.filter((v) => (v.name + ' ' + (v.unit ?? '')).toLowerCase().includes(q));
+  rows = sortBy(rows, (v) => v.name.toLowerCase());
+  $('hgui-picker-count').textContent = `${rows.length} candidates`;
+  if (!rows.length) { host.innerHTML = '<div class="hgui-empty">No variables match.</div>'; return; }
+  host.innerHTML = `<div class="hgui-tiles">${rows.map((v) => `
+    <div class="hgui-tile ${configured.has(v.name) ? 'muted' : ''}">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(v.name)}</div>
+        <div class="hgui-tile-actions">
+          ${configured.has(v.name)
+            ? '<span class="hgui-pill warning">already added</span>'
+            : `<button class="btn btn-sm btn-primary" data-pick-var="${h(v.name)}">Select</button>`}
+        </div>
+      </div>
+      <div class="hgui-tile-sub">CCU variable</div>
+      <div class="hgui-tile-meta">valuetype ${h(v.valuetype)}${v.unit ? ` (${h(v.unit)})` : ''} · current: ${h(String(v.value ?? '?'))}</div>
+    </div>`).join('')}</div>`;
+  host.querySelectorAll('[data-pick-var]').forEach((b) =>
+    b.addEventListener('click', () => {
+      state.nav.pop();
+      state.nav.push({ kind: 'editVariable', props: { name: b.dataset.pickVar, mode: 'add' } });
+      rerender();
+    }));
+}
+
+function subEditVariable(host, props) {
+  const { name, mode } = props;
   const info = variableLookup().get(name);
-  let bridgeIndex = -1;
+  let bridgeIndex = 0;
   let entry = null;
   for (let bi = 0; bi < state.blocks.length; bi++) {
     const found = state.blocks[bi].variables.find((v) => v.name === name);
     if (found) { bridgeIndex = bi; entry = found; break; }
   }
-  if (!entry) return;
-  openVariableEditor({ mode: 'edit', name, info, entry, bridgeIndex });
-}
-
-function openVariableEditor({ mode, name, info, entry, bridgeIndex }) {
   const draft = entry ? { ...entry } : { name, displayName: info?.name ?? name };
-  let target = bridgeIndex ?? 0;
-  const root = document.createElement('div');
-  root.innerHTML = `
-    <div class="hgui-meta mb-2"><code>${h(name)}</code>${info ? ` · valuetype ${h(info.valuetype)}` : ''}</div>
-    <div class="hgui-form-row">
-      <label>HomeKit name</label>
-      <div><input class="form-control" id="hgui-v-display" value="${h(draft.displayName ?? '')}" /></div>
+  let target = bridgeIndex;
+
+  subviewHeader(host, mode === 'add' ? 'Add variable' : `Edit variable: ${name}`, name);
+  $('hgui-sub-body').innerHTML = `
+    <div class="hgui-card">
+      <div class="hgui-meta mb-2"><code>${h(name)}</code>${info ? ` · valuetype ${h(info.valuetype)}` : ''}</div>
+      <div class="hgui-form-row">
+        <label>HomeKit name</label>
+        <div>
+          <input class="form-control" id="ev-display" value="${h(draft.displayName ?? '')}" />
+          <div class="hgui-hint">Defaults to the CCU variable name. Override to taste.</div>
+        </div>
+      </div>
+      <div class="hgui-form-row">
+        <label>Bridge</label>
+        <div>
+          <select class="form-select" id="ev-bridge">
+            ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === target ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
     </div>
-    <div class="hgui-form-row">
-      <label>Bridge</label>
-      <div><select class="form-select" id="hgui-v-bridge">
-        ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === target ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
-      </select></div>
-    </div>`;
-  root.querySelector('#hgui-v-display').addEventListener('input', (e) => { draft.displayName = e.target.value; });
-  root.querySelector('#hgui-v-bridge').addEventListener('change', (e) => { target = parseInt(e.target.value, 10); });
-  openModal({
-    title: mode === 'add' ? 'Add variable' : `Edit ${name}`,
-    body: root,
-    okLabel: mode === 'add' ? 'Add' : 'Save',
-    onOk: () => {
+  `;
+  $('ev-display').addEventListener('input', (e) => { draft.displayName = e.target.value; });
+  $('ev-bridge').addEventListener('change', (e) => { target = parseInt(e.target.value, 10); });
+
+  $('hgui-sub-footer').innerHTML = `
+    ${mode === 'edit' ? '<button class="btn btn-outline-danger" id="ev-remove">Remove from HomeKit</button>' : ''}
+    <button class="btn btn-secondary ms-auto" id="ev-cancel">Cancel</button>
+    <button class="btn btn-primary" id="ev-save">${mode === 'add' ? 'Add' : 'Save'}</button>
+  `;
+  $('ev-cancel').addEventListener('click', popNav);
+  $('ev-save').addEventListener('click', () => {
+    for (const b of state.blocks) {
+      const i = b.variables.findIndex((v) => v.name === name);
+      if (i !== -1) b.variables.splice(i, 1);
+    }
+    state.blocks[target].variables.push({
+      name,
+      ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
+    });
+    pushConfig();
+    homebridge.toast.success(mode === 'add' ? 'Variable added' : 'Variable updated', 'Variables');
+    popNav();
+  });
+  if (mode === 'edit') {
+    $('ev-remove').addEventListener('click', () => {
       for (const b of state.blocks) {
         const i = b.variables.findIndex((v) => v.name === name);
         if (i !== -1) b.variables.splice(i, 1);
       }
-      state.blocks[target].variables.push({
-        name,
-        ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
-      });
-      rerender();
-      homebridge.toast.success(mode === 'add' ? 'Variable added' : 'Variable updated', 'Variables');
-    },
-    footerExtra: mode === 'edit'
-      ? { label: 'Remove from HomeKit', onClick: () => {
-          for (const b of state.blocks) {
-            const i = b.variables.findIndex((v) => v.name === name);
-            if (i !== -1) b.variables.splice(i, 1);
-          }
-          rerender(); homebridge.toast.success('Variable removed', 'Variables');
-        } }
-      : null,
-  });
-}
-
-// ---------------------------------------------------------------- dialogs: program
-
-function openAddProgramDialog(preselectName) {
-  if (!state.discovered.programs.length) {
-    homebridge.toast.warning('Run "Discover devices" first', 'Add program');
-    return;
-  }
-  if (preselectName) return openProgramEditor({ mode: 'add', name: preselectName });
-  const root = document.createElement('div');
-  let q = '';
-  const draw = () => {
-    const rows = sortBy(
-      state.discovered.programs.filter((p) => !q || p.name.toLowerCase().includes(q)),
-      (p) => p.name.toLowerCase(),
-    );
-    const configured = new Set(state.blocks.flatMap((b) => b.programs.map((p) => p.name)));
-    root.innerHTML = `
-      <input type="search" class="form-control mb-2" id="hgui-pp-q" placeholder="Search programs…" autofocus />
-      <div style="max-height: 50vh; overflow-y: auto;">
-        <table class="hgui-grid">
-          <thead><tr><th>Name</th><th></th></tr></thead>
-          <tbody>${rows.map((p) => `
-            <tr><td><code>${h(p.name)}</code></td>
-              <td class="hgui-row-actions">${configured.has(p.name)
-                ? '<span class="hgui-pill">added</span>'
-                : `<button class="btn btn-sm btn-primary" data-pick-prog="${h(p.name)}">Select</button>`}
-              </td>
-            </tr>`).join('')}</tbody>
-        </table>
-      </div>`;
-    root.querySelector('#hgui-pp-q').addEventListener('input', (e) => { q = e.target.value.trim().toLowerCase(); draw(); });
-    root.querySelectorAll('[data-pick-prog]').forEach((b) => {
-      b.addEventListener('click', () => {
-        bsModal().hide();
-        setTimeout(() => openProgramEditor({ mode: 'add', name: b.dataset.pickProg }), 250);
-      });
+      pushConfig();
+      homebridge.toast.success('Variable removed', 'Variables');
+      popNav();
     });
-  };
-  draw();
-  openModal({ title: 'Add program — pick from CCU', body: root, okLabel: 'Done', onOk: () => true });
+  }
 }
 
-function openEditProgramDialog(name) {
-  let bridgeIndex = -1;
+// --- pickProgram / editProgram
+
+function subPickProgram(host) {
+  subviewHeader(host, 'Add program — pick from CCU');
+  $('hgui-sub-body').innerHTML = `
+    <div class="hgui-toolbar">
+      <input type="search" id="hgui-picker-search" class="form-control" placeholder="Search programs…"
+             value="${h(state.ui.search.picker)}" autofocus />
+      <span class="hgui-meta ms-auto" id="hgui-picker-count"></span>
+    </div>
+    <div id="hgui-picker-host"></div>
+  `;
+  $('hgui-picker-search').addEventListener('input', (e) => { state.ui.search.picker = e.target.value; drawProgramPicker(); });
+  drawProgramPicker();
+}
+function drawProgramPicker() {
+  const host = $('hgui-picker-host');
+  const configured = new Set(state.blocks.flatMap((b) => b.programs.map((p) => p.name)));
+  const q = state.ui.search.picker.trim().toLowerCase();
+  let rows = state.discovered.programs;
+  if (q) rows = rows.filter((p) => p.name.toLowerCase().includes(q));
+  rows = sortBy(rows, (p) => p.name.toLowerCase());
+  $('hgui-picker-count').textContent = `${rows.length} candidates`;
+  if (!rows.length) { host.innerHTML = '<div class="hgui-empty">No programs match.</div>'; return; }
+  host.innerHTML = `<div class="hgui-tiles">${rows.map((p) => `
+    <div class="hgui-tile ${configured.has(p.name) ? 'muted' : ''}">
+      <div class="hgui-tile-head">
+        <div class="hgui-tile-name">${h(p.name)}</div>
+        <div class="hgui-tile-actions">
+          ${configured.has(p.name)
+            ? '<span class="hgui-pill warning">already added</span>'
+            : `<button class="btn btn-sm btn-primary" data-pick-prog="${h(p.name)}">Select</button>`}
+        </div>
+      </div>
+      <div class="hgui-tile-sub">CCU program</div>
+      <div class="hgui-tile-meta">${h(p.name)}</div>
+    </div>`).join('')}</div>`;
+  host.querySelectorAll('[data-pick-prog]').forEach((b) =>
+    b.addEventListener('click', () => {
+      state.nav.pop();
+      state.nav.push({ kind: 'editProgram', props: { name: b.dataset.pickProg, mode: 'add' } });
+      rerender();
+    }));
+}
+
+function subEditProgram(host, props) {
+  const { name, mode } = props;
+  let bridgeIndex = 0;
   let entry = null;
   for (let bi = 0; bi < state.blocks.length; bi++) {
     const found = state.blocks[bi].programs.find((p) => p.name === name);
     if (found) { bridgeIndex = bi; entry = found; break; }
   }
-  if (!entry) return;
-  openProgramEditor({ mode: 'edit', name, entry, bridgeIndex });
-}
-
-function openProgramEditor({ mode, name, entry, bridgeIndex }) {
   const draft = entry ? { ...entry } : { name, displayName: name };
-  let target = bridgeIndex ?? 0;
-  const root = document.createElement('div');
-  root.innerHTML = `
-    <div class="hgui-meta mb-2"><code>${h(name)}</code></div>
-    <div class="hgui-form-row">
-      <label>HomeKit name</label>
-      <div><input class="form-control" id="hgui-p-display" value="${h(draft.displayName ?? '')}" /></div>
+  let target = bridgeIndex;
+
+  subviewHeader(host, mode === 'add' ? 'Add program' : `Edit program: ${name}`, name);
+  $('hgui-sub-body').innerHTML = `
+    <div class="hgui-card">
+      <div class="hgui-meta mb-2"><code>${h(name)}</code></div>
+      <div class="hgui-form-row">
+        <label>HomeKit name</label>
+        <div><input class="form-control" id="ep-display" value="${h(draft.displayName ?? '')}" /></div>
+      </div>
+      <div class="hgui-form-row">
+        <label>Bridge</label>
+        <div>
+          <select class="form-select" id="ep-bridge">
+            ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === target ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
     </div>
-    <div class="hgui-form-row">
-      <label>Bridge</label>
-      <div><select class="form-select" id="hgui-p-bridge">
-        ${state.blocks.map((b, bi) => `<option value="${bi}" ${bi === target ? 'selected' : ''}>${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
-      </select></div>
-    </div>`;
-  root.querySelector('#hgui-p-display').addEventListener('input', (e) => { draft.displayName = e.target.value; });
-  root.querySelector('#hgui-p-bridge').addEventListener('change', (e) => { target = parseInt(e.target.value, 10); });
-  openModal({
-    title: mode === 'add' ? 'Add program' : `Edit ${name}`,
-    body: root,
-    okLabel: mode === 'add' ? 'Add' : 'Save',
-    onOk: () => {
+  `;
+  $('ep-display').addEventListener('input', (e) => { draft.displayName = e.target.value; });
+  $('ep-bridge').addEventListener('change', (e) => { target = parseInt(e.target.value, 10); });
+  $('hgui-sub-footer').innerHTML = `
+    ${mode === 'edit' ? '<button class="btn btn-outline-danger" id="ep-remove">Remove from HomeKit</button>' : ''}
+    <button class="btn btn-secondary ms-auto" id="ep-cancel">Cancel</button>
+    <button class="btn btn-primary" id="ep-save">${mode === 'add' ? 'Add' : 'Save'}</button>
+  `;
+  $('ep-cancel').addEventListener('click', popNav);
+  $('ep-save').addEventListener('click', () => {
+    for (const b of state.blocks) {
+      const i = b.programs.findIndex((p) => p.name === name);
+      if (i !== -1) b.programs.splice(i, 1);
+    }
+    state.blocks[target].programs.push({
+      name,
+      ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
+    });
+    pushConfig();
+    homebridge.toast.success(mode === 'add' ? 'Program added' : 'Program updated', 'Programs');
+    popNav();
+  });
+  if (mode === 'edit') {
+    $('ep-remove').addEventListener('click', () => {
       for (const b of state.blocks) {
         const i = b.programs.findIndex((p) => p.name === name);
         if (i !== -1) b.programs.splice(i, 1);
       }
-      state.blocks[target].programs.push({
-        name,
-        ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
-      });
-      rerender();
-      homebridge.toast.success(mode === 'add' ? 'Program added' : 'Program updated', 'Programs');
-    },
-    footerExtra: mode === 'edit'
-      ? { label: 'Remove from HomeKit', onClick: () => {
-          for (const b of state.blocks) {
-            const i = b.programs.findIndex((p) => p.name === name);
-            if (i !== -1) b.programs.splice(i, 1);
-          }
-          rerender(); homebridge.toast.success('Program removed', 'Programs');
-        } }
-      : null,
+      pushConfig();
+      homebridge.toast.success('Program removed', 'Programs');
+      popNav();
+    });
+  }
+}
+
+// --- editBridge / removeBridge
+
+function subEditBridge(host, props) {
+  const { bridgeIndex } = props;
+  const b = state.blocks[bridgeIndex];
+  let nameDraft = b.name;
+  subviewHeader(host, `Rename bridge: ${b.name}`);
+  $('hgui-sub-body').innerHTML = `
+    <div class="hgui-card">
+      <div class="hgui-form-row">
+        <label>Bridge name</label>
+        <div>
+          <input class="form-control" id="eb-name" value="${h(nameDraft)}" />
+          <div class="hgui-hint">Shown in the Home app and in Homebridge logs.</div>
+        </div>
+      </div>
+    </div>
+  `;
+  $('eb-name').addEventListener('input', (e) => { nameDraft = e.target.value; });
+  $('hgui-sub-footer').innerHTML = `
+    <button class="btn btn-secondary ms-auto" id="eb-cancel">Cancel</button>
+    <button class="btn btn-primary" id="eb-save">Save</button>
+  `;
+  $('eb-cancel').addEventListener('click', popNav);
+  $('eb-save').addEventListener('click', () => {
+    const v = nameDraft.trim();
+    if (!v) { homebridge.toast.warning('Name cannot be empty'); return; }
+    b.name = v;
+    pushConfig();
+    homebridge.toast.success('Renamed bridge', 'Bridges');
+    popNav();
+  });
+}
+
+function subRemoveBridge(host, props) {
+  const { bridgeIndex } = props;
+  const b = state.blocks[bridgeIndex];
+  const accs = (b.channels?.length ?? 0) + (b.variables?.length ?? 0) + (b.programs?.length ?? 0);
+  subviewHeader(host, `Remove bridge: ${b.name}`);
+  $('hgui-sub-body').innerHTML = `
+    <div class="hgui-card">
+      <p>This bridge has <strong>${accs}</strong> accessories.
+         Removing it deletes all of them from the configuration.
+         The HomeKit pairing on the bridge becomes orphaned in the Home app — you'll need to remove the bridge there too.</p>
+    </div>
+  `;
+  $('hgui-sub-footer').innerHTML = `
+    <button class="btn btn-secondary ms-auto" id="rb-cancel">Cancel</button>
+    <button class="btn btn-danger" id="rb-confirm">Remove bridge</button>
+  `;
+  $('rb-cancel').addEventListener('click', popNav);
+  $('rb-confirm').addEventListener('click', () => {
+    state.blocks.splice(bridgeIndex, 1);
+    if (state.blocks.length === 0) state.blocks.push(DEFAULT_BLOCK());
+    pushConfig();
+    homebridge.toast.success('Bridge removed', 'Bridges');
+    popNav();
   });
 }
 
@@ -1295,8 +1332,7 @@ async function onDiscover() {
     rerender();
     homebridge.toast.success(
       `${res.devices.length} devices · ${res.variables.length} variables · ${res.programs.length} programs · ${res.rooms.length} rooms`,
-      'Discovery complete',
-    );
+      'Discovery complete');
   } catch (err) {
     homebridge.toast.error(err.message, 'Discovery');
   } finally { homebridge.hideSpinner(); }
@@ -1309,28 +1345,22 @@ async function onImport() {
   const status = $('hgui-import-status');
   $('hgui-import-warnings').innerHTML = '';
   $('hgui-bridges-summary').innerHTML = '';
-
   homebridge.showSpinner();
   try {
     let report;
     if (file) {
       const buf = await file.arrayBuffer();
-      const tarballBase64 = bufToBase64(buf);
-      report = await homebridge.request('/import-backup', { tarballBase64 });
+      report = await homebridge.request('/import-backup', { tarballBase64: bufToBase64(buf) });
     } else if (pasted.length) {
       report = await homebridge.request('/import-config-json', { configJson: pasted });
     } else {
       homebridge.toast.warning('Provide a backup file or paste a config.json first', 'Import');
       return;
     }
-
     if (multi) {
       const blocks = await homebridge.request('/split-into-bridges', { report });
-      // Rebuild state.blocks: keep existing main, replace child bridges from import.
       const main = state.blocks[0];
-      // Apply common settings from report.meta if missing.
       if (report.meta?.ccuIp && !main.ccuIp) main.ccuIp = report.meta.ccuIp;
-      // First bridge from import becomes main contents (preserving main bridge identity).
       state.blocks = [
         { ...main, channels: blocks[0]?.channels ?? [], variables: blocks[0]?.variables ?? [], programs: blocks[0]?.programs ?? [], name: blocks[0]?.name ?? main.name },
         ...blocks.slice(1).map((bb) => ({
@@ -1340,19 +1370,18 @@ async function onImport() {
           name: bb.name, _bridge: bb.bridge, channels: bb.channels, variables: bb.variables, programs: bb.programs,
         })),
       ];
-      $('hgui-bridges-summary').innerHTML = `
-        <div class="alert alert-info">${blocks.length} bridges configured. Review them in the <strong>Bridges</strong> tab and click Save when ready.</div>`;
+      $('hgui-bridges-summary').innerHTML = `<div class="alert alert-info">${blocks.length} bridges configured. Review them in the Bridges tab and click "Save configuration".</div>`;
     } else {
       mergeReportIntoMain(report);
     }
-
     if (report.warnings?.length) {
       $('hgui-import-warnings').innerHTML =
         '<div class="alert alert-warning"><strong>Imported with warnings:</strong><ul class="mb-0">' +
         report.warnings.map((w) => `<li>${h(w)}</li>`).join('') + '</ul></div>';
     }
     status.textContent = `Imported ${report.channels.length} channels, ${report.variables.length} variables, ${report.programs.length} programs.`;
-    homebridge.toast.success('Import complete — review and Save', 'Import');
+    pushConfig();
+    homebridge.toast.success('Import complete — review the changes and click Save at the bottom of the page', 'Import');
     rerender();
   } catch (err) {
     homebridge.toast.error(err.message, 'Import');
@@ -1374,22 +1403,21 @@ function mergeReportIntoMain(report) {
   if (report.meta?.ccuIp && !main.ccuIp) main.ccuIp = report.meta.ccuIp;
 }
 
-async function onSave() {
-  $('hgui-save-status').textContent = '';
-  homebridge.showSpinner();
+/**
+ * Push the current state.blocks (plus any other-platform blocks we
+ * round-trip) to the homebridge UI host. The host's built-in "Save"
+ * button at the bottom of the plugin settings page persists this to
+ * disk — we deliberately don't call savePluginConfig() ourselves so
+ * the user has one canonical Save control, not two.
+ */
+function pushConfig() {
   try {
     const next = [...state.otherBlocks, ...state.blocks];
-    await homebridge.updatePluginConfig(next);
-    await homebridge.savePluginConfig();
-    $('hgui-save-status').textContent = '✓ Saved';
-    homebridge.toast.success(`Saved ${state.blocks.length} bridge(s)`, 'Saved');
+    homebridge.updatePluginConfig(next);
   } catch (err) {
-    $('hgui-save-status').textContent = '✗ ' + err.message;
-    homebridge.toast.error(err.message, 'Save failed');
-  } finally { homebridge.hideSpinner(); }
+    homebridge.toast.error(`Could not stage config update: ${err.message}`);
+  }
 }
-
-// ---------------------------------------------------------------- helpers
 
 function bufToBase64(buf) {
   const bytes = new Uint8Array(buf);
@@ -1404,26 +1432,23 @@ function bufToBase64(buf) {
 // ---------------------------------------------------------------- init
 
 async function init() {
-  try {
-    homebridge.hideSchemaForm?.();
-    homebridge.disableSaveButton?.();
-  } catch (_e) { /* older Homebridge UI versions */ }
+  // Hide the schema form so the user only sees our custom UI, but keep
+  // the host's built-in Save button enabled — it's the single canonical
+  // place to persist config. Every mutation calls pushConfig() to stage
+  // the change, and the host save button writes it to disk.
+  try { homebridge.hideSchemaForm?.(); } catch { /* older host */ }
 
-  // Load config blocks: take everything with platform=HomematicHap (or
-  // the first block missing a platform) into state.blocks; keep
-  // unrelated blocks in state.otherBlocks for round-tripping.
   try {
     const blocks = await homebridge.getPluginConfig();
-    const ours = [];
-    const other = [];
+    const ours = []; const other = [];
     for (const b of blocks ?? []) {
       if (!b) continue;
       if (b.platform === 'HomematicHap' || b.platform === undefined) ours.push(b);
       else other.push(b);
     }
-    if (ours.length === 0) ours.push(DEFAULT_BLOCK());
-    // Merge defaults into each block so we don't crash on partials.
-    state.blocks = ours.map((b) => ({ ...DEFAULT_BLOCK(), ...b,
+    if (!ours.length) ours.push(DEFAULT_BLOCK());
+    state.blocks = ours.map((b) => ({
+      ...DEFAULT_BLOCK(), ...b,
       interfaces: { ...DEFAULT_BLOCK().interfaces, ...(b.interfaces ?? {}) },
       ccuAuth: { ...DEFAULT_BLOCK().ccuAuth, ...(b.ccuAuth ?? {}) },
       eventServer: { ...DEFAULT_BLOCK().eventServer, ...(b.eventServer ?? {}) },
@@ -1436,27 +1461,27 @@ async function init() {
   }
 
   try {
-    state.services = await homebridge.request('/services');
+    const r = await homebridge.request('/services');
+    state.services = r;
+    if (r.pluginVersion) {
+      state.pluginVersion = r.pluginVersion;
+      $('hgui-version-banner').textContent = `v${r.pluginVersion}`;
+    }
   } catch (err) {
-    homebridge.toast.error(`Could not load service list: ${err.message}`);
+    homebridge.toast.error(`Could not load services: ${err.message}`);
   }
 
-  // Probe the plugin version for a dashboard banner.
-  try {
-    const r = await fetch('package.json'); // server.src.js doesn't expose this; harmless if it 404s
-    if (r.ok) state.pluginVersion = (await r.json())?.version ?? state.pluginVersion;
-  } catch { /* ignore */ }
-  $('hgui-version-banner').textContent = state.pluginVersion !== 'unknown' ? `v${state.pluginVersion}` : '';
-
-  // Wire sidebar.
-  document.querySelectorAll('.hgui-nav-link').forEach((el) => {
-    el.addEventListener('click', () => navigate(el.dataset.view));
-  });
+  // Header listeners.
+  $('hgui-view-select').addEventListener('change', (e) => navigate(e.target.value));
   $('hgui-discover-btn').addEventListener('click', onDiscover);
   $('hgui-test-btn').addEventListener('click', onTestConnection);
-  $('hgui-save-btn').addEventListener('click', onSave);
 
-  rerender();
+  // Esc pops the sub-view stack (back button affordance).
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.nav.length) popNav();
+  });
+
+  navigate('dashboard');
 }
 
 init();

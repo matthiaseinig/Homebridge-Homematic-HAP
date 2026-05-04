@@ -22,7 +22,9 @@ import { HomebridgePluginUiServer, RequestError } from '@homebridge/plugin-ui-ut
 // user is just running `node server.js` to verify the install, this is
 // the first thing they see. If you DON'T see this line, the file isn't
 // reachable from the install path.
-{
+// Read once at boot so /services can return it without re-reading per
+// request and so the boot banner has the same source of truth.
+const PLUGIN_VERSION = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   const pkgPath = resolvePath(here, '..', 'package.json');
   let version = 'unknown';
@@ -39,7 +41,8 @@ import { HomebridgePluginUiServer, RequestError } from '@homebridge/plugin-ui-ut
       'The custom UI cannot start without the compiled dist/ folder. ' +
       'Re-install the plugin (npm install --install-links /path/to/clone) and restart Homebridge.');
   }
-}
+  return version;
+})();
 
 import { CcuClient } from '../dist/src/ccu/CcuClient.js';
 import { resolveConfig, ConfigError } from '../dist/src/util/config.js';
@@ -88,6 +91,7 @@ class HomematicHapUiServer extends HomebridgePluginUiServer {
 
   handleServices() {
     return {
+      pluginVersion: PLUGIN_VERSION,
       channelServices: SERVICE_DEFINITIONS.map((s) => ({
         key: s.key,
         description: s.description,

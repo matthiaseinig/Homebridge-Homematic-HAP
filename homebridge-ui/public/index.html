@@ -1,100 +1,104 @@
 <!--
   Custom UI for homebridge-homematic-hap.
 
-  Layout convention: homebridge-config-ui-x renders this inside a
-  sandboxed iframe and injects Bootstrap 5 + a `homebridge.*` global.
-  We deliberately omit <html>/<head>/<body> per the plugin-ui-utils
-  contract.
+  homebridge-config-ui-x renders this inside a sandboxed iframe and
+  injects Bootstrap 5 CSS + a `homebridge.*` global. It does NOT
+  inject Bootstrap JS, so we build modals, dropdowns and toggles in
+  vanilla CSS/JS — never call `new bootstrap.Modal(...)`.
+
+  Per the plugin-ui-utils contract we omit <html>/<head>/<body>.
 -->
 
 <style>
   /* App chrome ----------------------------------------------------- */
-  .hgui-app { display: grid; grid-template-columns: 220px 1fr; gap: 1rem; min-height: 600px; }
-  @media (max-width: 768px) { .hgui-app { grid-template-columns: 1fr; } }
-  .hgui-side { background: var(--bs-tertiary-bg, #f8f9fa); border-radius: 8px; padding: 0.75rem; position: sticky; top: 0.5rem; align-self: start; }
-  .hgui-nav-link { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.75rem; border-radius: 6px; cursor: pointer; user-select: none; color: var(--bs-body-color); }
-  .hgui-nav-link:hover { background: var(--bs-secondary-bg, #e9ecef); }
-  .hgui-nav-link.active { background: var(--bs-primary, #0d6efd); color: #fff; }
-  .hgui-nav-badge { margin-left: auto; font-size: 0.75rem; background: var(--bs-secondary-bg, #e9ecef); color: var(--bs-body-color); padding: 0.1rem 0.45rem; border-radius: 999px; }
-  .hgui-nav-link.active .hgui-nav-badge { background: rgba(255,255,255,0.25); color: #fff; }
-  .hgui-main { min-width: 0; }
-  .hgui-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
-  .hgui-toolbar .form-control { max-width: 320px; }
-  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color, #ddd); z-index: 5; display: flex; gap: 0.5rem; align-items: center; }
+  #hgui-app { display: flex; flex-direction: column; min-height: 100vh; }
+  .hgui-header { display: flex; gap: 0.5rem; align-items: center; padding: 0.75rem 0; flex-wrap: wrap; }
+  .hgui-header .hgui-brand { font-weight: 600; }
+  .hgui-header .hgui-version { color: var(--bs-secondary-color, #6c757d); font-size: 0.8rem; }
+  .hgui-main { flex: 1; min-width: 0; }
 
-  /* Grid ----------------------------------------------------------- */
-  .hgui-grid { width: 100%; border-collapse: separate; border-spacing: 0; }
-  .hgui-grid th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bs-secondary-color, #6c757d); padding: 0.5rem; border-bottom: 1px solid var(--bs-border-color, #dee2e6); position: sticky; top: 0; background: var(--bs-body-bg); }
-  .hgui-grid td { padding: 0.5rem; border-bottom: 1px solid var(--bs-border-color-translucent, #eee); vertical-align: middle; }
-  .hgui-grid tr:hover td { background: var(--bs-tertiary-bg, #f8f9fa); }
-  .hgui-grid code { font-size: 0.8rem; }
-  .hgui-row-actions { display: flex; gap: 0.25rem; justify-content: flex-end; }
-  .hgui-empty { color: var(--bs-secondary-color, #6c757d); font-style: italic; padding: 1.5rem; text-align: center; }
+  .hgui-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color, #dee2e6); border-bottom: 1px solid var(--bs-border-color, #dee2e6); position: sticky; top: 0; background: var(--bs-body-bg); z-index: 10; }
+  .hgui-toolbar .form-control, .hgui-toolbar .form-select { max-width: 280px; }
+  .hgui-toolbar input.form-control { min-width: 200px; }
+
+  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color, #dee2e6); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+  /* Tiles ---------------------------------------------------------- */
+  /* Tile min-width drives how many fit per row. The iframe is hosted
+     inside Bootstrap's modal-xl (1140 px); 280 px gives ~3 tiles per
+     row at full width and degrades gracefully on narrower viewports. */
+  .hgui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.75rem 0; }
+  .hgui-tile { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color, #dee2e6); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
+  .hgui-tile.muted { opacity: 0.65; }
+  .hgui-tile-head { display: flex; align-items: flex-start; gap: 0.5rem; }
+  .hgui-tile-name { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; word-break: break-word; }
+  .hgui-tile-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+  .hgui-tile-sub  { color: var(--bs-secondary-color, #6c757d); font-size: 0.875rem; }
+  .hgui-tile-meta { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: var(--bs-secondary-color, #6c757d); word-break: break-all; }
+  .hgui-tile-pills { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+  .hgui-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.72rem; background: var(--bs-secondary-bg, #e9ecef); color: var(--bs-body-color); white-space: nowrap; }
+  .hgui-pill.primary  { background: var(--bs-primary, #0d6efd); color: #fff; }
+  .hgui-pill.success  { background: var(--bs-success, #198754); color: #fff; }
+  .hgui-pill.warning  { background: var(--bs-warning, #ffc107); color: #000; }
+  .hgui-pill.muted    { background: transparent; border: 1px dashed var(--bs-border-color, #dee2e6); color: var(--bs-secondary-color, #6c757d); }
+
+  /* Bridge tile (slightly different shape) -------------------------- */
+  .hgui-bridge-tile .hgui-tile-actions { flex-wrap: wrap; }
+
+  /* Empty / pager -------------------------------------------------- */
+  .hgui-empty { color: var(--bs-secondary-color, #6c757d); font-style: italic; padding: 2rem; text-align: center; border: 1px dashed var(--bs-border-color, #dee2e6); border-radius: 8px; margin-top: 1rem; }
+  .hgui-pager { display: flex; gap: 0.25rem; align-items: center; justify-content: center; padding: 0.75rem 0; flex-wrap: wrap; }
+
+  /* Cards (used in dashboard / settings) --------------------------- */
+  .hgui-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color, #dee2e6); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+  .hgui-card h6 { margin-bottom: 0.5rem; }
   .hgui-meta { color: var(--bs-secondary-color, #6c757d); font-size: 0.85rem; }
 
-  /* Pagination ----------------------------------------------------- */
-  .hgui-pager { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-end; margin-top: 0.5rem; flex-wrap: wrap; }
-  .hgui-pager button { min-width: 2rem; }
-
-  /* Cards ---------------------------------------------------------- */
-  .hgui-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color, #e0e0e0); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
-
-  /* Dialog form rows ---------------------------------------------- */
-  .hgui-form-row { display: grid; grid-template-columns: 200px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; align-items: start; }
+  /* Form rows ------------------------------------------------------ */
+  .hgui-form-row { display: grid; grid-template-columns: 180px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; align-items: start; }
   @media (max-width: 700px) { .hgui-form-row { grid-template-columns: 1fr; } }
   .hgui-form-row label { padding-top: 0.5rem; font-weight: 500; }
   .hgui-form-row .hgui-hint { color: var(--bs-secondary-color, #6c757d); font-size: 0.825rem; margin-top: 0.25rem; }
 
-  /* Bridge view --------------------------------------------------- */
-  .hgui-bridge-card { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 1rem; align-items: center; }
-  .hgui-pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; background: var(--bs-secondary-bg, #e9ecef); color: var(--bs-body-color); }
+  /* Custom modal (no Bootstrap JS dependency) ---------------------- */
+  .hgui-modal { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; }
+  .hgui-modal.show { display: flex; }
+  .hgui-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+  .hgui-modal-dialog { position: relative; background: var(--bs-body-bg, #fff); color: var(--bs-body-color); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); width: min(720px, 92vw); max-height: 90vh; display: flex; flex-direction: column; }
+  .hgui-modal-dialog.large { width: min(960px, 95vw); }
+  .hgui-modal-header { padding: 0.85rem 1rem; border-bottom: 1px solid var(--bs-border-color, #dee2e6); display: flex; align-items: center; gap: 0.5rem; }
+  .hgui-modal-title { font-weight: 600; font-size: 1.05rem; flex: 1; }
+  .hgui-modal-close { background: transparent; border: 0; font-size: 1.4rem; line-height: 1; padding: 0.25rem 0.5rem; cursor: pointer; color: var(--bs-secondary-color, #6c757d); }
+  .hgui-modal-body { padding: 1rem; overflow-y: auto; flex: 1; }
+  .hgui-modal-footer { padding: 0.75rem 1rem; border-top: 1px solid var(--bs-border-color, #dee2e6); display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+  .hgui-modal-footer .left { margin-right: auto; }
 </style>
 
-<div id="hgui-app" class="hgui-app">
-  <!-- Sidebar nav -->
-  <aside class="hgui-side">
-    <div class="mb-2 text-uppercase small text-muted">homebridge-homematic-hap</div>
-    <div data-view="dashboard"  class="hgui-nav-link active">📊 Dashboard</div>
-    <div data-view="channels"   class="hgui-nav-link">💡 Channels <span class="hgui-nav-badge" data-count="channels">0</span></div>
-    <div data-view="variables"  class="hgui-nav-link">🔢 Variables <span class="hgui-nav-badge" data-count="variables">0</span></div>
-    <div data-view="programs"   class="hgui-nav-link">▶️ Programs <span class="hgui-nav-badge" data-count="programs">0</span></div>
-    <div data-view="bridges"    class="hgui-nav-link">🌉 Bridges <span class="hgui-nav-badge" data-count="bridges">1</span></div>
-    <div data-view="import"     class="hgui-nav-link">📥 Import</div>
-    <div data-view="settings"   class="hgui-nav-link">⚙️ Settings</div>
-    <hr/>
-    <button id="hgui-discover-btn" class="btn btn-primary btn-sm w-100 mb-2">Discover devices</button>
-    <button id="hgui-test-btn" class="btn btn-outline-secondary btn-sm w-100">Test CCU</button>
-    <div id="hgui-test-result" class="small mt-2"></div>
-  </aside>
+<div id="hgui-app">
 
-  <!-- Main area -->
+  <!-- Header: brand, view dropdown, persistent action buttons --------- -->
+  <header class="hgui-header">
+    <div class="hgui-brand">homebridge-homematic-hap</div>
+    <span class="hgui-version" id="hgui-version-banner"></span>
+    <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+      <select id="hgui-view-select" class="form-select form-select-sm" style="min-width: 200px">
+        <option value="dashboard">📊 Dashboard</option>
+        <option value="channels">💡 Channels</option>
+        <option value="variables">🔢 Variables</option>
+        <option value="programs">▶️ Programs</option>
+        <option value="bridges">🌉 Bridges</option>
+        <option value="import">📥 Import</option>
+        <option value="settings">⚙️ Settings</option>
+      </select>
+      <button id="hgui-discover-btn" class="btn btn-primary btn-sm">Discover</button>
+      <button id="hgui-test-btn" class="btn btn-outline-secondary btn-sm">Test CCU</button>
+      <span id="hgui-test-result" class="small"></span>
+    </div>
+  </header>
+
   <main class="hgui-main">
     <div id="hgui-view-host"></div>
-    <div class="hgui-floating-bar">
-      <button id="hgui-save-btn" class="btn btn-success">Save configuration</button>
-      <span id="hgui-save-status" class="ms-2"></span>
-      <span class="ms-auto small text-muted" id="hgui-version-banner"></span>
-    </div>
   </main>
-</div>
-
-<!-- Generic modal host: lazily filled by app.js. We use Bootstrap 5's
-     modal element directly so styling matches what Homebridge UI X
-     ships. -->
-<div class="modal fade" id="hgui-modal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="hgui-modal-title">Edit</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body" id="hgui-modal-body"></div>
-      <div class="modal-footer" id="hgui-modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="hgui-modal-ok">Save</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script type="module" src="app.js"></script>

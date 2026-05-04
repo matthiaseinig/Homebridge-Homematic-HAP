@@ -168,7 +168,7 @@ import {
   VARIABLE_SERVICE_DEFINITIONS,
   servicesForChannelType
 } from "../dist/src/services/registry.js";
-{
+var PLUGIN_VERSION = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   const pkgPath = resolvePath(here, "..", "package.json");
   let version = "unknown";
@@ -184,7 +184,8 @@ import {
   if (!distPresent) {
     console.error(`[homebridge-homematic-hap UI] FATAL: ${distRoot} does not exist. The custom UI cannot start without the compiled dist/ folder. Re-install the plugin (npm install --install-links /path/to/clone) and restart Homebridge.`);
   }
-}
+  return version;
+})();
 var MAX_BASE64_BYTES = 96 * 1024 * 1024;
 var UiLogger = class {
   info(...args) {
@@ -221,6 +222,7 @@ var HomematicHapUiServer = class extends HomebridgePluginUiServer {
   // --- handlers ----------------------------------------------------
   handleServices() {
     return {
+      pluginVersion: PLUGIN_VERSION,
       channelServices: SERVICE_DEFINITIONS.map((s) => ({
         key: s.key,
         description: s.description,
