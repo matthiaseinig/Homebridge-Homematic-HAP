@@ -41,7 +41,7 @@ class UiLogger {
   prefix = 'ui';
 }
 
-class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
+class HomematicHapUiServer extends HomebridgePluginUiServer {
   constructor() {
     super();
 
@@ -190,8 +190,8 @@ class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
     }
     try {
       return resolveConfig({
-        platform: 'HomematicWithGui',
-        name: typeof payload.name === 'string' ? payload.name : 'HomematicWithGui',
+        platform: 'HomematicHap',
+        name: typeof payload.name === 'string' ? payload.name : 'HomematicHap',
         ccuIp: payload.ccuIp,
         useTls: payload.useTls,
         interfaces: payload.interfaces,
@@ -207,5 +207,5 @@ class HomematicWithGuiUiServer extends HomebridgePluginUiServer {
   }
 }
 
-export { HomematicWithGuiUiServer, mergeIntoConfig };
-export default new HomematicWithGuiUiServer();
+export { HomematicHapUiServer, mergeIntoConfig };
+export default new HomematicHapUiServer();

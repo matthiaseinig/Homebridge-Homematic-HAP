@@ -90,7 +90,7 @@ export function resolveConfig(raw: RawConfig): ResolvedConfig {
   const programs = Array.isArray(raw.programs) ? raw.programs.filter(Boolean) : [];
 
   return {
-    name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'HomematicWithGui',
+    name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'HomematicHap',
     ccuIp,
     interfaces,
     useTls,

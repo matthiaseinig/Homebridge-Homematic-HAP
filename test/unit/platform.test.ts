@@ -74,7 +74,7 @@ describe('HomematicPlatform', () => {
   it('logs and stays idle when ccuIp missing', () => {
     const log = makeLog();
     const api = makeApi();
-    const platform = new HomematicPlatform(log, { platform: 'HomematicWithGui' }, api as unknown as API);
+    const platform = new HomematicPlatform(log, { platform: 'HomematicHap' }, api as unknown as API);
     expect(platform.getCcu()).toBeUndefined();
     expect(vi.mocked(log.error)).toHaveBeenCalled();
   });
@@ -82,7 +82,7 @@ describe('HomematicPlatform', () => {
   it('configureAccessory restores cached accessories', () => {
     const log = makeLog();
     const api = makeApi();
-    const platform = new HomematicPlatform(log, { platform: 'HomematicWithGui', ccuIp: '127.0.0.1' }, api as unknown as API);
+    const platform = new HomematicPlatform(log, { platform: 'HomematicHap', ccuIp: '127.0.0.1' }, api as unknown as API);
     const acc = { UUID: 'uuid:test', displayName: 'X', context: {} } as unknown as PlatformAccessory;
     platform.configureAccessory(acc);
     expect(platform.getCcu()).toBeDefined();
@@ -92,7 +92,7 @@ describe('HomematicPlatform', () => {
     const log = makeLog();
     const api = makeApi();
     const config = {
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       channels: [{ address: 'HmIP.0:1', service: 'SwitchAccessory' }],
       variables: [{ name: 'V1' }],
@@ -118,7 +118,7 @@ describe('HomematicPlatform', () => {
   it('removes stale accessories on next launch', async () => {
     const log = makeLog();
     const api = makeApi();
-    const config = { platform: 'HomematicWithGui', ccuIp: '127.0.0.1', channels: [] };
+    const config = { platform: 'HomematicHap', ccuIp: '127.0.0.1', channels: [] };
     const platform = new HomematicPlatform(log, config, api as unknown as API);
     const stale = { UUID: 'uuid:channel:HmIP.OLD:1', displayName: 'old', context: {} } as unknown as PlatformAccessory;
     platform.configureAccessory(stale);
@@ -134,7 +134,7 @@ describe('HomematicPlatform', () => {
     const log = makeLog();
     const api = makeApi();
     const config = {
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       channels: [{ address: 'HmIP.0:1', service: 'NopeAccessory' }],
     };
@@ -150,7 +150,7 @@ describe('HomematicPlatform', () => {
   it('shutdown stops the CCU client', async () => {
     const log = makeLog();
     const api = makeApi();
-    const platform = new HomematicPlatform(log, { platform: 'HomematicWithGui', ccuIp: '127.0.0.1' }, api as unknown as API);
+    const platform = new HomematicPlatform(log, { platform: 'HomematicHap', ccuIp: '127.0.0.1' }, api as unknown as API);
     const ccu = platform.getCcu()!;
     const stopSpy = vi.spyOn(ccu, 'stop').mockResolvedValue(undefined);
     api.emit(APIEvent.SHUTDOWN);
@@ -162,7 +162,7 @@ describe('HomematicPlatform', () => {
     const log = makeLog();
     const api = makeApi();
     const config = {
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       channels: [{ address: 'HmIP.UNK:1', service: 'SwitchAccessory', name: 'Stubby' }],
     };
@@ -184,7 +184,7 @@ describe('HomematicPlatform', () => {
     const log = makeLog();
     const api = makeApi();
     const config = {
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       channels: [{ address: 'HmIP.0:1', service: 'SwitchAccessory' }],
     };
@@ -207,7 +207,7 @@ describe('HomematicPlatform', () => {
     const log = makeLog();
     const api = makeApi();
     const config = {
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       variables: [{ name: 'Missing' }],
     };

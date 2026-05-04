@@ -250,7 +250,7 @@ export function splitReportIntoBridges(report: ImportReport): BridgeImportBlock[
   if (uuids.length === 0) {
     return [{
       instanceUuid: 'default',
-      name: 'HomematicWithGui',
+      name: 'HomematicHap',
       bridge: bridgeIdentityFor('default'),
       channels: [...report.channels],
       variables: [...report.variables],
@@ -262,7 +262,7 @@ export function splitReportIntoBridges(report: ImportReport): BridgeImportBlock[
   for (const uuid of uuids) {
     blocks.set(uuid, {
       instanceUuid: uuid,
-      name: instances[uuid]?.name ?? `HomematicWithGui-${uuid.slice(0, 8)}`,
+      name: instances[uuid]?.name ?? `HomematicHap-${uuid.slice(0, 8)}`,
       bridge: bridgeIdentityFor(uuid),
       channels: [],
       variables: [],

@@ -6,7 +6,7 @@ import { resolveConfig } from '../../src/util/config.js';
 import type { ChannelEvent } from '../../src/ccu/EventServer.js';
 
 function makeCcu(): CcuClient {
-  const config = resolveConfig({ platform: 'HomematicWithGui', ccuIp: '127.0.0.1' });
+  const config = resolveConfig({ platform: 'HomematicHap', ccuIp: '127.0.0.1' });
   return new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'ccu-test') });
 }
 

@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 function build(context: AccessoryContext) {
-  const config = resolveConfig({ platform: 'HomematicWithGui', ccuIp: '127.0.0.1' });
+  const config = resolveConfig({ platform: 'HomematicHap', ccuIp: '127.0.0.1' });
   const ccu = new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'v') });
   const hap = makeHapStub();
   const accessory = makeAccessory<AccessoryContext>('uuid', context.id, context);

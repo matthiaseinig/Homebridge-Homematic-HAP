@@ -2,7 +2,7 @@
 
 ## Threat model
 
-`homebridge-homematic-with-gui` runs in the trusted Homebridge process on a
+`homebridge-homematic-hap` runs in the trusted Homebridge process on a
 LAN host that already has full RPC and ReGa access to your CCU. It is not a
 multi-tenant product and is not intended to be exposed to the public
 internet. The relevant threats it actively mitigates are:

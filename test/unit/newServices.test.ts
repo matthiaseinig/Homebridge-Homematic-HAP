@@ -22,7 +22,7 @@ interface TestEnv {
 }
 
 function makeEnv(): TestEnv {
-  const config = resolveConfig({ platform: 'HomematicWithGui', ccuIp: '127.0.0.1' });
+  const config = resolveConfig({ platform: 'HomematicHap', ccuIp: '127.0.0.1' });
   const ccu = new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'sv') });
   return {
     ccu,

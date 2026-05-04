@@ -18,7 +18,7 @@ afterEach(() => {
 
 function makeCcu(): CcuClient {
   const config = resolveConfig({
-    platform: 'HomematicWithGui',
+    platform: 'HomematicHap',
     ccuIp: '127.0.0.1',
     eventServer: { host: '127.0.0.1', port: 9876, watchdogSeconds: 60 },
     interfaces: { bidcosRf: false, hmIpRf: false, bidcosWired: false, virtualDevices: false, cuxd: false },
@@ -84,7 +84,7 @@ describe('CcuClient resolveCallbackHost', () => {
 
   it('falls back when host is 0.0.0.0', () => {
     const config = resolveConfig({
-      platform: 'HomematicWithGui',
+      platform: 'HomematicHap',
       ccuIp: '127.0.0.1',
       eventServer: { host: '0.0.0.0', port: 9876 },
     });

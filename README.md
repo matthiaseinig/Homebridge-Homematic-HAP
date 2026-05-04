@@ -109,7 +109,7 @@ sudo hb-service restart   # or: sudo systemctl restart homebridge
 Once on npm, this becomes a single line:
 
 ```bash
-sudo npm install -g homebridge-homematic-with-gui   # not yet published
+sudo npm install -g homebridge-homematic-hap   # not yet published
 ```
 
 ## Quick start

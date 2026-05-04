@@ -1,5 +1,5 @@
 /**
- * Frontend logic for the homebridge-homematic-with-gui custom UI.
+ * Frontend logic for the homebridge-homematic-hap custom UI.
  * Plain ES modules + the global `homebridge` object — no framework.
  *
  * The app has one piece of state, `model`, which mirrors the plugin
@@ -12,8 +12,8 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   model: {
-    platform: 'HomematicWithGui',
-    name: 'HomematicWithGui',
+    platform: 'HomematicHap',
+    name: 'HomematicHap',
     ccuIp: '',
     useTls: false,
     interfaces: { bidcosRf: true, hmIpRf: true, bidcosWired: false, virtualDevices: true, cuxd: false },
@@ -33,7 +33,7 @@ async function init() {
   // Load existing config — pluginConfig is an array of platform blocks.
   try {
     const blocks = await homebridge.getPluginConfig();
-    const block = blocks.find((b) => b && (b.platform === 'HomematicWithGui' || b.platform === undefined)) ?? blocks[0];
+    const block = blocks.find((b) => b && (b.platform === 'HomematicHap' || b.platform === undefined)) ?? blocks[0];
     if (block) {
       state.model = { ...state.model, ...block };
     }
@@ -463,11 +463,11 @@ async function onSave() {
     const existing = await homebridge.getPluginConfig();
 
     if (state.pendingBridgeBlocks && state.pendingBridgeBlocks.length > 0) {
-      // Multi-bridge mode: replace any existing HomematicWithGui block(s)
+      // Multi-bridge mode: replace any existing HomematicHap block(s)
       // with one platform-config block per imported child bridge.
-      const kept = existing.filter((b) => !b || b.platform !== 'HomematicWithGui');
+      const kept = existing.filter((b) => !b || b.platform !== 'HomematicHap');
       const generated = state.pendingBridgeBlocks.map((bb) => ({
-        platform: 'HomematicWithGui',
+        platform: 'HomematicHap',
         name: bb.name,
         _bridge: bb.bridge,
         ccuIp: state.model.ccuIp,
@@ -490,7 +490,7 @@ async function onSave() {
     }
 
     // Single-bridge mode (default).
-    const idx = existing.findIndex((b) => b && b.platform === 'HomematicWithGui');
+    const idx = existing.findIndex((b) => b && b.platform === 'HomematicHap');
     if (idx === -1) {
       existing.push(state.model);
     } else {

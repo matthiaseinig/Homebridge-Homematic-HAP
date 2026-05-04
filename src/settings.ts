@@ -5,5 +5,5 @@
  * when persisting accessories.
  */
 
-export const PLATFORM_NAME = 'HomematicWithGui';
-export const PLUGIN_NAME = 'homebridge-homematic-with-gui';
+export const PLATFORM_NAME = 'HomematicHap';
+export const PLUGIN_NAME = 'homebridge-homematic-hap';

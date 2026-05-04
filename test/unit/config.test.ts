@@ -18,7 +18,7 @@ describe('isValidHost', () => {
 });
 
 describe('resolveConfig', () => {
-  const base = { platform: 'HomematicWithGui', ccuIp: '192.168.1.10' };
+  const base = { platform: 'HomematicHap', ccuIp: '192.168.1.10' };
 
   it('fills defaults for everything else', () => {
     const c = resolveConfig(base);

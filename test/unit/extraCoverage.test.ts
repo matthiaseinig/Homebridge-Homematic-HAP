@@ -88,14 +88,14 @@ describe('storage edge cases', () => {
 
 describe('CcuClient internals', () => {
   it('routes addresses without dots (bare interface name) to BidCos-RF default', () => {
-    const config = resolveConfig({ platform: 'HomematicWithGui', ccuIp: '127.0.0.1' });
+    const config = resolveConfig({ platform: 'HomematicHap', ccuIp: '127.0.0.1' });
     const ccu = new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'i') });
     const intfFor = (ccu as unknown as { interfaceForAddress(a: string): string }).interfaceForAddress.bind(ccu);
     expect(intfFor('NoDot')).toBe('BidCos-RF');
   });
 
   it('routes hmip-lowercase prefix to HmIP-RF', () => {
-    const config = resolveConfig({ platform: 'HomematicWithGui', ccuIp: '127.0.0.1' });
+    const config = resolveConfig({ platform: 'HomematicHap', ccuIp: '127.0.0.1' });
     const ccu = new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'i') });
     const intfFor = (ccu as unknown as { interfaceForAddress(a: string): string }).interfaceForAddress.bind(ccu);
     expect(intfFor('hmip.X:1')).toBe('HmIP-RF');
@@ -117,7 +117,7 @@ describe('CcuClient watchdog', () => {
     vi.useFakeTimers();
     try {
       const config = resolveConfig({
-        platform: 'HomematicWithGui',
+        platform: 'HomematicHap',
         ccuIp: '127.0.0.1',
         eventServer: { host: '127.0.0.1', port: 9876, watchdogSeconds: 60 },
       });

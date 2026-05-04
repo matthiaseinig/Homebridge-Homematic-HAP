@@ -22,7 +22,7 @@ save the resulting `*.tar.gz` file. The archive contains:
 ## Step 2 — Install this plugin
 
 ```bash
-npm install -g homebridge-homematic-with-gui
+npm install -g homebridge-homematic-hap
 ```
 
 …or install via the Homebridge UI's plugin browser. Restart Homebridge
@@ -71,8 +71,8 @@ Click *Save configuration*. Homebridge restarts the plugin. Watch the
 Homebridge log:
 
 ```
-[HomematicWithGui] Connected to CCU at 192.168.1.10
-[HomematicWithGui:ccu:rpc:HmIP-RF] Subscribed (homebridge-homematic-with-gui:HmIP-RF -> http://...:9875)
+[HomematicHap] Connected to CCU at 192.168.1.10
+[HomematicHap:ccu:rpc:HmIP-RF] Subscribed (homebridge-homematic-hap:HmIP-RF -> http://...:9875)
 ```
 
 Open the Home app. Your accessories should appear within a few
