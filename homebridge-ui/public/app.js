@@ -350,7 +350,7 @@ function channelTileHTML(r) {
         </div>
       </div>
       <div class="hgui-tile-sub">${subtitle}</div>
-      <div class="hgui-tile-meta">${h(r.address)}${channelType ? ` · ${h(channelType)}` : ''}</div>
+      <div class="hgui-tile-meta"><code>${h(r.address)}</code>${channelType ? ` · ${h(channelType)}` : ''}</div>
       <div class="hgui-tile-pills">
         ${inHK ? `<span class="hgui-pill primary">${h(r.service ?? '?')}</span>` : '<span class="hgui-pill muted">not in HomeKit</span>'}
         ${r.subtype ? `<span class="hgui-pill">${h(r.subtype)}</span>` : ''}
@@ -473,7 +473,7 @@ function variableTileHTML(r) {
         </div>
       </div>
       <div class="hgui-tile-sub">CCU variable</div>
-      <div class="hgui-tile-meta">${h(r.name)}${info ? ` · valuetype ${h(info.valuetype)}${info.unit ? ` (${h(info.unit)})` : ''} · current: ${h(String(info.value ?? '?'))}` : ''}</div>
+      <div class="hgui-tile-meta"><code>${h(r.name)}</code>${info ? ` · valuetype ${h(info.valuetype)}${info.unit ? ` (${h(info.unit)})` : ''} · current: ${h(String(info.value ?? '?'))}` : ''}</div>
       <div class="hgui-tile-pills">
         ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
         ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
@@ -581,7 +581,7 @@ function programTileHTML(r) {
         </div>
       </div>
       <div class="hgui-tile-sub">CCU program</div>
-      <div class="hgui-tile-meta">${h(r.name)}</div>
+      <div class="hgui-tile-meta"><code>${h(r.name)}</code></div>
       <div class="hgui-tile-pills">
         ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
         ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
@@ -884,7 +884,7 @@ function drawPicker() {
           </div>
         </div>
         <div class="hgui-tile-sub">${h(x.device.name)} · ${h(x.device.type)}</div>
-        <div class="hgui-tile-meta">${h(x.channel.address)} · ${h(x.channel.type)}</div>
+        <div class="hgui-tile-meta"><code>${h(x.channel.address)}</code> · ${h(x.channel.type)}</div>
       </div>`;
   }).join('')}</div>`;
   pagerHost.innerHTML = pagerHTML('picker', page, pageCount);

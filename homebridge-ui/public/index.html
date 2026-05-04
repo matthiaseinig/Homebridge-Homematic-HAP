@@ -33,20 +33,30 @@
   .hgui-toolbar .form-control, .hgui-toolbar .form-select { max-width: 280px; }
   .hgui-toolbar input.form-control { min-width: 200px; }
 
-  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color-translucent); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  /* Sub-view footer: sticky button bar with NO background fill — the
+     border alone is enough; a fill clashes with both the page bg in
+     dark mode and the tiles above. */
+  .hgui-floating-bar { position: sticky; bottom: 0; background: transparent; padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color-translucent); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
   /* Tiles ---------------------------------------------------------- */
   /* Tile min-width drives how many fit per row. The iframe is hosted
      inside Bootstrap's modal-xl (1140 px); 280 px gives ~3 tiles per
      row at full width and degrades gracefully on narrower viewports. */
   .hgui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.75rem 0; }
-  .hgui-tile { background: transparent; color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
+  /* --bs-tertiary-bg adapts: a near-white in light mode (#f8f9fa)
+     and a slightly-lighter dark in dark mode (#2b3035). Gives tiles
+     subtle separation from the page background in either theme. */
+  .hgui-tile { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
   .hgui-tile.muted { opacity: 0.6; }
   .hgui-tile-head { display: flex; align-items: flex-start; gap: 0.5rem; }
   .hgui-tile-name { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; word-break: break-word; color: var(--bs-body-color); }
   .hgui-tile-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
   .hgui-tile-sub  { color: var(--bs-secondary-color); font-size: 0.875rem; }
-  .hgui-tile-meta { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: var(--bs-secondary-color); word-break: break-all; }
+  /* tile-meta is the address line. The `<code>` wrapped on the
+     address picks up Bootstrap's --bs-code-color (a pinkish red) in
+     both themes; the type after the dot stays in secondary color. */
+  .hgui-tile-meta { font-size: 0.78rem; color: var(--bs-secondary-color); word-break: break-all; }
+  .hgui-tile-meta code { font-size: 0.82rem; }
   .hgui-tile-pills { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 
   /* Pills lean on Bootstrap's bg-* tokens so light/dark text contrast
@@ -65,12 +75,12 @@
   .hgui-pager { display: flex; gap: 0.25rem; align-items: center; justify-content: center; padding: 0.75rem 0; flex-wrap: wrap; }
 
   /* Cards (used in dashboard / settings) --------------------------- */
-  .hgui-card { background: transparent; color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+  .hgui-card { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
   .hgui-card h6 { margin-bottom: 0.5rem; }
   .hgui-meta { color: var(--bs-secondary-color); font-size: 0.85rem; }
 
   /* Form rows ------------------------------------------------------ */
-  .hgui-form-row { display: grid; grid-template-columns: 180px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; align-items: start; }
+  .hgui-form-row { display: grid; grid-template-columns: 130px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; align-items: start; }
   @media (max-width: 700px) { .hgui-form-row { grid-template-columns: 1fr; } }
   .hgui-form-row label { padding-top: 0.5rem; font-weight: 500; color: var(--bs-body-color); }
   .hgui-form-row .hgui-hint { color: var(--bs-secondary-color); font-size: 0.825rem; margin-top: 0.25rem; }
