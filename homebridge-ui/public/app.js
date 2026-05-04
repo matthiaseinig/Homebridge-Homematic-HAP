@@ -30,6 +30,14 @@ const state = {
 };
 
 async function init() {
+  // The plugin renders its own UI; hide Homebridge UI's built-in
+  // schema form + outer Save button so the user doesn't see two
+  // competing save controls.
+  try {
+    homebridge.hideSchemaForm?.();
+    homebridge.disableSaveButton?.();
+  } catch (_e) { /* older Homebridge UI versions: best-effort */ }
+
   // Load existing config — pluginConfig is an array of platform blocks.
   try {
     const blocks = await homebridge.getPluginConfig();
