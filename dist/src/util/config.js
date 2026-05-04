@@ -61,10 +61,31 @@ function resolveConfig(raw) {
   const channels = Array.isArray(raw.channels) ? raw.channels.filter(Boolean) : [];
   const variables = Array.isArray(raw.variables) ? raw.variables.filter(Boolean) : [];
   const programs = Array.isArray(raw.programs) ? raw.programs.filter(Boolean) : [];
+  const validInterfaceIds = /* @__PURE__ */ new Set([
+    "BidCos-RF",
+    "HmIP-RF",
+    "BidCos-Wired",
+    "VirtualDevices",
+    "CUxD"
+  ]);
+  const interfacePorts = {};
+  if (raw.interfacePorts && typeof raw.interfacePorts === "object") {
+    for (const [k, v] of Object.entries(raw.interfacePorts)) {
+      if (!validInterfaceIds.has(k)) {
+        throw new ConfigError(`interfacePorts: unknown interface "${k}"`);
+      }
+      const port = Number(v);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new ConfigError(`interfacePorts.${k} must be an integer in [1, 65535]`);
+      }
+      interfacePorts[k] = port;
+    }
+  }
   return {
     name: typeof raw.name === "string" && raw.name.length > 0 ? raw.name : "HomematicHap",
     ccuIp,
     interfaces,
+    interfacePorts,
     useTls,
     ccuAuth,
     eventServer: { host: evHost, port: evPort, watchdogSeconds: evWatchdog },

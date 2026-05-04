@@ -8,6 +8,7 @@
  */
 
 import type {
+  CcuInterfaceId,
   EventServerConfig,
   InterfaceToggles,
   RawConfig,
@@ -89,10 +90,28 @@ export function resolveConfig(raw: RawConfig): ResolvedConfig {
   const variables = Array.isArray(raw.variables) ? raw.variables.filter(Boolean) : [];
   const programs = Array.isArray(raw.programs) ? raw.programs.filter(Boolean) : [];
 
+  const validInterfaceIds: ReadonlySet<CcuInterfaceId> = new Set([
+    'BidCos-RF', 'HmIP-RF', 'BidCos-Wired', 'VirtualDevices', 'CUxD',
+  ]);
+  const interfacePorts: Partial<Record<CcuInterfaceId, number>> = {};
+  if (raw.interfacePorts && typeof raw.interfacePorts === 'object') {
+    for (const [k, v] of Object.entries(raw.interfacePorts)) {
+      if (!validInterfaceIds.has(k as CcuInterfaceId)) {
+        throw new ConfigError(`interfacePorts: unknown interface "${k}"`);
+      }
+      const port = Number(v);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new ConfigError(`interfacePorts.${k} must be an integer in [1, 65535]`);
+      }
+      interfacePorts[k as CcuInterfaceId] = port;
+    }
+  }
+
   return {
     name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'HomematicHap',
     ccuIp,
     interfaces,
+    interfacePorts,
     useTls,
     ccuAuth,
     eventServer: { host: evHost, port: evPort, watchdogSeconds: evWatchdog },

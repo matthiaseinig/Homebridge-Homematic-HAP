@@ -5,9 +5,13 @@
  * EventServer receives push events.
  */
 
+import { createConnection } from 'node:net';
 import { createRequire } from 'node:module';
 import type { PrefixedLogger } from '../util/logger.js';
 import type { CcuInterfaceId } from '../types.js';
+
+/** Default timeout for the pre-init TCP reachability probe. */
+const PROBE_TIMEOUT_MS = 5_000;
 
 export const INTERFACE_PORTS: Record<CcuInterfaceId, number> = {
   'BidCos-RF': 2001,
@@ -121,10 +125,39 @@ export class RpcClient {
 
   /** Subscribe to events. Idempotent. */
   async subscribe(): Promise<void> {
+    // Probe TCP reachability with a short timeout BEFORE the XML-RPC init,
+    // because the homematic-xmlrpc client uses the kernel default connect
+    // timeout (~2 min on Linux). A locked-down CCU firewall would otherwise
+    // hang the platform start for two minutes per interface.
+    // The probe is skipped when a transport was injected for tests.
+    if (!this.transportFactory) {
+      await this.probeReachable();
+    }
     const t = await this.ensureTransport();
     await t.call('init', [this.callbackUrl, this.callbackId]);
     this.subscribed = true;
     this.log.info('Subscribed (%s -> %s)', this.callbackId, this.callbackUrl);
+  }
+
+  private async probeReachable(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const socket = createConnection({ host: this.host, port: this.port });
+      let settled = false;
+      const finish = (err?: Error): void => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        if (err) reject(err); else resolve();
+      };
+      socket.setTimeout(PROBE_TIMEOUT_MS, () => {
+        finish(new RpcError(`init failed: connect ETIMEDOUT ${this.host}:${this.port}`));
+      });
+      socket.once('connect', () => finish());
+      socket.once('error', (err: NodeJS.ErrnoException) => {
+        const code = err.code ?? 'unknown';
+        finish(new RpcError(`init failed: connect ${code} ${this.host}:${this.port}`, err));
+      });
+    });
   }
 
   /** Unsubscribe — best-effort, swallows errors. */

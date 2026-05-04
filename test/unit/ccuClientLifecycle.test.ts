@@ -191,6 +191,46 @@ describe('CcuClient runtime interface discovery', () => {
   });
 });
 
+describe('CcuClient interfacePorts override', () => {
+  it('uses the user-supplied port even when listInterfaces returns a different one', async () => {
+    // RaspberryMatic firewall regression: listInterfaces returns +30000
+    // ports but the CCU firewall blocks them; user pins legacy 2001 in
+    // config. The override must beat the discovered value.
+    const config = resolveConfig({
+      platform: 'HomematicHap',
+      ccuIp: '127.0.0.1',
+      eventServer: { host: '127.0.0.1', port: 9876 },
+      interfaces: { bidcosRf: true, hmIpRf: false, bidcosWired: false, virtualDevices: false, cuxd: false },
+      interfacePorts: { 'BidCos-RF': 2001 },
+    });
+    const ccu = new CcuClient({ config, log: new PrefixedLogger(makeLog(), 'lc-override') });
+    vi.spyOn(ccu.api, 'listInterfaces').mockResolvedValue([{ name: 'BidCos-RF', port: 32001 }]);
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    vi.spyOn(ccu.eventServer, 'stop').mockResolvedValue(undefined);
+
+    // Spy on RpcClient ctor by monkey-patching the rpcClients map after start.
+    // We can't easily intercept the ctor, so instead we'll observe via the
+    // probe failure: subscribe() will fail (no listener on either port), but
+    // we can pull the port from the warn log.
+    const warns: string[] = [];
+    vi.spyOn(ccu['log'] as unknown as { warn: (...args: unknown[]) => void }, 'warn')
+      .mockImplementation((fmt: string, ...args: unknown[]) => {
+        warns.push([fmt, ...args].map(String).join(' '));
+      });
+    const infos: string[] = [];
+    vi.spyOn(ccu['log'] as unknown as { info: (...args: unknown[]) => void }, 'info')
+      .mockImplementation((fmt: string, ...args: unknown[]) => {
+        infos.push([fmt, ...args].map(String).join(' '));
+      });
+
+    await ccu.start();
+    // The startup log should announce port 2001 (override), not 32001 (discovery).
+    expect(infos.join('\n')).toMatch(/Using XML-RPC port 2001 for BidCos-RF \(config override\)/);
+    await ccu.stop();
+  });
+});
+
 describe('CcuClient address → interface lookup', () => {
   it('routes addresses based on the discovered device tree, not the address prefix', async () => {
     const ccu = makeCcu();

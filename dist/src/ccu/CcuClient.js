@@ -60,10 +60,14 @@ class CcuClient extends EventEmitter {
         continue;
       }
       const callbackId = `${PLUGIN_NAME}:${id}`;
+      const overridePort = this.config.interfacePorts[id];
+      const port = overridePort ?? this.discoveredPorts.get(id) ?? INTERFACE_PORTS[id];
+      const portSource = overridePort !== void 0 ? "config override" : this.discoveredPorts.has(id) ? "CCU listInterfaces" : "built-in default";
+      this.log.info("Using XML-RPC port %d for %s (%s)", port, id, portSource);
       const client = new RpcClient({
         interfaceId: id,
         host: this.config.ccuIp,
-        port: this.discoveredPorts.get(id) ?? INTERFACE_PORTS[id],
+        port,
         callbackUrl,
         callbackId,
         log: this.log.child(`rpc:${id}`)
@@ -72,7 +76,16 @@ class CcuClient extends EventEmitter {
         await client.subscribe();
         this.rpcClients.set(id, client);
       } catch (err) {
-        this.log.warn("Could not subscribe to %s: %s", id, err.message);
+        const msg = err.message;
+        this.log.warn("Could not subscribe to %s: %s", id, msg);
+        if (/ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH/.test(msg)) {
+          this.log.warn(
+            'Hint: %s:%d is not reachable from this host. On RaspberryMatic, open the CCU WebUI \u2192 Settings \u2192 Control Panel \u2192 Security \u2192 Configure firewall, and set "XML-RPC API" to "Open" or "Restricted access" with this Homebridge host whitelisted. Alternatively, set interfacePorts.%s in the plugin config to a port that IS reachable (e.g. 2001/2010/9292 if Homebridge and the CCU share the same host).',
+            this.config.ccuIp,
+            port,
+            id
+          );
+        }
       }
     }
     this.lastEventAt = Date.now();

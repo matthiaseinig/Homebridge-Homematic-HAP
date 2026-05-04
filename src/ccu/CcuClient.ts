@@ -110,10 +110,23 @@ export class CcuClient extends EventEmitter {
         continue;
       }
       const callbackId = `${PLUGIN_NAME}:${id}`;
+      // Resolution order: explicit user override > listInterfaces discovery
+      // > built-in default. The override is the only escape hatch when the
+      // CCU's reported port isn't actually reachable from this host (the
+      // common case is RaspberryMatic reporting +30000 ports that are
+      // firewalled off by the CCU's "Restrict access" firewall preset).
+      const overridePort = this.config.interfacePorts[id];
+      const port = overridePort
+        ?? this.discoveredPorts.get(id)
+        ?? INTERFACE_PORTS[id];
+      const portSource = overridePort !== undefined
+        ? 'config override'
+        : this.discoveredPorts.has(id) ? 'CCU listInterfaces' : 'built-in default';
+      this.log.info('Using XML-RPC port %d for %s (%s)', port, id, portSource);
       const client = new RpcClient({
         interfaceId: id,
         host: this.config.ccuIp,
-        port: this.discoveredPorts.get(id) ?? INTERFACE_PORTS[id],
+        port,
         callbackUrl,
         callbackId,
         log: this.log.child(`rpc:${id}`),
@@ -122,7 +135,20 @@ export class CcuClient extends EventEmitter {
         await client.subscribe();
         this.rpcClients.set(id, client);
       } catch (err) {
-        this.log.warn('Could not subscribe to %s: %s', id, (err as Error).message);
+        const msg = (err as Error).message;
+        this.log.warn('Could not subscribe to %s: %s', id, msg);
+        if (/ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH/.test(msg)) {
+          this.log.warn(
+            'Hint: %s:%d is not reachable from this host. On RaspberryMatic, '
+              + 'open the CCU WebUI → Settings → Control Panel → Security → '
+              + 'Configure firewall, and set "XML-RPC API" to "Open" or '
+              + '"Restricted access" with this Homebridge host whitelisted. '
+              + 'Alternatively, set interfacePorts.%s in the plugin config '
+              + 'to a port that IS reachable (e.g. 2001/2010/9292 if Homebridge '
+              + 'and the CCU share the same host).',
+            this.config.ccuIp, port, id,
+          );
+        }
       }
     }
 

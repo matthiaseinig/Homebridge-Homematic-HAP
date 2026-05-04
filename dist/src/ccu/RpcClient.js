@@ -1,4 +1,6 @@
+import { createConnection } from "node:net";
 import { createRequire } from "node:module";
+const PROBE_TIMEOUT_MS = 5e3;
 const INTERFACE_PORTS = {
   "BidCos-RF": 2001,
   "HmIP-RF": 2010,
@@ -66,10 +68,34 @@ class RpcClient {
   }
   /** Subscribe to events. Idempotent. */
   async subscribe() {
+    if (!this.transportFactory) {
+      await this.probeReachable();
+    }
     const t = await this.ensureTransport();
     await t.call("init", [this.callbackUrl, this.callbackId]);
     this.subscribed = true;
     this.log.info("Subscribed (%s -> %s)", this.callbackId, this.callbackUrl);
+  }
+  async probeReachable() {
+    await new Promise((resolve, reject) => {
+      const socket = createConnection({ host: this.host, port: this.port });
+      let settled = false;
+      const finish = (err) => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        if (err) reject(err);
+        else resolve();
+      };
+      socket.setTimeout(PROBE_TIMEOUT_MS, () => {
+        finish(new RpcError(`init failed: connect ETIMEDOUT ${this.host}:${this.port}`));
+      });
+      socket.once("connect", () => finish());
+      socket.once("error", (err) => {
+        const code = err.code ?? "unknown";
+        finish(new RpcError(`init failed: connect ${code} ${this.host}:${this.port}`, err));
+      });
+    });
   }
   /** Unsubscribe — best-effort, swallows errors. */
   async unsubscribe() {

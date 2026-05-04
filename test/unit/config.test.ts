@@ -79,4 +79,50 @@ describe('resolveConfig', () => {
     const c = resolveConfig({ ...base, name: 'Custom' });
     expect(c.name).toBe('Custom');
   });
+
+  describe('interfacePorts', () => {
+    it('defaults to empty object', () => {
+      const c = resolveConfig(base);
+      expect(c.interfacePorts).toEqual({});
+    });
+
+    it('passes through valid per-interface overrides', () => {
+      const c = resolveConfig({
+        ...base,
+        interfacePorts: { 'BidCos-RF': 2001, 'HmIP-RF': 2010 },
+      });
+      expect(c.interfacePorts['BidCos-RF']).toBe(2001);
+      expect(c.interfacePorts['HmIP-RF']).toBe(2010);
+    });
+
+    it('rejects unknown interface names', () => {
+      expect(() => resolveConfig({
+        ...base,
+        interfacePorts: { 'Bogus': 1234 } as never,
+      })).toThrow(/unknown interface/);
+    });
+
+    it('rejects out-of-range port values', () => {
+      expect(() => resolveConfig({
+        ...base,
+        interfacePorts: { 'BidCos-RF': 0 },
+      })).toThrow(/BidCos-RF/);
+      expect(() => resolveConfig({
+        ...base,
+        interfacePorts: { 'BidCos-RF': 70000 },
+      })).toThrow(/BidCos-RF/);
+    });
+
+    it('rejects non-integer port values', () => {
+      expect(() => resolveConfig({
+        ...base,
+        interfacePorts: { 'BidCos-RF': 'nope' as unknown as number },
+      })).toThrow(/BidCos-RF/);
+    });
+
+    it('ignores non-object interfacePorts gracefully', () => {
+      const c = resolveConfig({ ...base, interfacePorts: null as never });
+      expect(c.interfacePorts).toEqual({});
+    });
+  });
 });

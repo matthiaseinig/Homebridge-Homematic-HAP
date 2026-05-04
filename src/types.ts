@@ -39,6 +39,8 @@ export interface ResolvedConfig {
   name: string;
   ccuIp: string;
   interfaces: InterfaceToggles;
+  /** Manual XML-RPC port overrides per interface; takes precedence over discovery. */
+  interfacePorts: Partial<Record<CcuInterfaceId, number>>;
   useTls: boolean;
   ccuAuth: CcuAuthConfig;
   eventServer: EventServerConfig;
@@ -100,6 +102,7 @@ export interface AccessoryContext {
 export interface RawConfig extends PlatformConfig {
   ccuIp?: string;
   interfaces?: Partial<InterfaceToggles>;
+  interfacePorts?: Partial<Record<CcuInterfaceId, number>>;
   useTls?: boolean;
   ccuAuth?: Partial<CcuAuthConfig>;
   eventServer?: Partial<EventServerConfig>;

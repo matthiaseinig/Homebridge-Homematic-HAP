@@ -93,6 +93,32 @@ describe('RpcClient', () => {
   });
 });
 
+describe('RpcClient TCP reachability probe', () => {
+  it('subscribe() rejects fast with a clear message when the port is unreachable', async () => {
+    // Use a port we know is closed on localhost (well-known unassigned).
+    // No transport is injected so the real probe runs.
+    const c = new RpcClient({
+      interfaceId: 'BidCos-RF',
+      host: '127.0.0.1',
+      port: 1, // privileged + unbound -> immediate ECONNREFUSED
+      callbackUrl: 'http://example/cb',
+      callbackId: 'cbid',
+      log: new PrefixedLogger(makeLog(), 'rpc-test'),
+    });
+    await expect(c.subscribe()).rejects.toThrow(/init failed: connect/);
+    expect(c.isSubscribed()).toBe(false);
+  });
+
+  it('skips the probe when a test transport is injected', async () => {
+    // Transport injection is the contract that lets unit tests bypass real
+    // sockets. Verifies the probe stays out of the way for tests.
+    const t = makeTransport();
+    const c = makeClient(t);
+    await expect(c.subscribe()).resolves.toBeUndefined();
+    expect(c.isSubscribed()).toBe(true);
+  });
+});
+
 describe('patchDeserializerForUnknownTags', () => {
   it('makes the homematic-xmlrpc Deserializer ignore non-spec tags like META', async () => {
     patchDeserializerForUnknownTags();

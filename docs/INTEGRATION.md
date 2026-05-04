@@ -79,6 +79,11 @@ looks like this:
     "virtualDevices": true,
     "cuxd": false
   },
+  "interfacePorts": {
+    "BidCos-RF": 32001,
+    "HmIP-RF": 32010,
+    "VirtualDevices": 39292
+  },
   "ccuAuth": {
     "enabled": false,
     "username": "",
@@ -107,6 +112,7 @@ looks like this:
 | `ccuIp` | IP or hostname of the CCU. Both work; hostnames are resolved at start-up. |
 | `useTls` | If `true`, ReGa scripts use HTTPS on port 48181. The CCU's self-signed cert is accepted. |
 | `interfaces.*` | Toggle per CCU interface. Disable interfaces you don't use to silence warnings on hosts that block those ports. |
+| `interfacePorts.*` | Manual XML-RPC port override per interface. Leave blank to auto-discover via `Interface.listInterfaces`. Set explicitly when the auto-discovered port is not reachable from the Homebridge host (e.g. blocked by the CCU's firewall — RaspberryMatic's "Restrict access" presets block the +30000 ports unless XML-RPC API is set to *Open* or *Restricted access* with the Homebridge host whitelisted). |
 | `ccuAuth.enabled` | Set to `true` if your CCU requires Basic auth on the WebUI. The credentials never leave `config.json` and are never logged. |
 | `eventServer.host` | Address the CCU should call back. `0.0.0.0` auto-detects. Set explicitly when running in Docker or behind multiple NICs. |
 | `eventServer.port` | Default 9875. Pick anything in 1024–65535. |
@@ -161,10 +167,18 @@ Messages* page lists registered RPC clients — your callback URL should
 be there. If it isn't, there's a routing or NAT issue between CCU and
 Homebridge.
 
-**"No RPC client for interface X"**
-The interface failed to subscribe at startup (often because the port is
-firewalled or the CCU has that interface disabled). Either enable the
-interface on the CCU or untoggle it in the plugin's interface list.
+**"No RPC client for interface X" or `init failed: connect ETIMEDOUT`**
+The interface failed to subscribe at startup. Most common cause on
+RaspberryMatic: the CCU firewall blocks external XML-RPC ports
+(32001/32010/39292). Open the CCU WebUI → **Settings → Control Panel →
+Security → Configure firewall**, set **XML-RPC API** to *Open* or
+*Restricted access* with the Homebridge host whitelisted, and restart
+Homebridge.
+
+If you cannot change the firewall, you can pin alternative ports in
+`interfacePorts.*` — e.g. `2001/2010/9292` if Homebridge runs on the
+**same host** as the CCU and can reach loopback. Otherwise the CCU
+binds those legacy ports to localhost only.
 
 **Variables seem to lag.**
 Variables are polled every 60 s. The CCU does not push variable

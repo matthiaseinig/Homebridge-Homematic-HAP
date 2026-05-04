@@ -35,6 +35,18 @@
           "cuxd":          { "title": "CUxD (BIN-RPC, planned)", "type": "boolean", "default": false }
         }
       },
+      "interfacePorts": {
+        "title": "XML-RPC port overrides",
+        "type": "object",
+        "description": "Override the XML-RPC ports the plugin uses to talk to each CCU interface. Leave blank to auto-discover via Interface.listInterfaces. Set explicitly only if the auto-discovered port is not reachable from this Homebridge host (e.g. blocked by the CCU firewall).",
+        "properties": {
+          "BidCos-RF":      { "title": "BidCos-RF port",      "type": "integer", "minimum": 1, "maximum": 65535, "placeholder": "32001" },
+          "HmIP-RF":        { "title": "HmIP-RF port",        "type": "integer", "minimum": 1, "maximum": 65535, "placeholder": "32010" },
+          "BidCos-Wired":   { "title": "BidCos-Wired port",   "type": "integer", "minimum": 1, "maximum": 65535, "placeholder": "32000" },
+          "VirtualDevices": { "title": "VirtualDevices port", "type": "integer", "minimum": 1, "maximum": 65535, "placeholder": "39292" },
+          "CUxD":           { "title": "CUxD port",           "type": "integer", "minimum": 1, "maximum": 65535, "placeholder": "8701"  }
+        }
+      },
       "useTls": {
         "title": "Use TLS to talk to CCU",
         "type": "boolean",
