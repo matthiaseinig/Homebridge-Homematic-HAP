@@ -20,19 +20,21 @@ class ContactHandler extends AccessoryBase {
       service.getCharacteristic(this.Characteristic.TargetPosition).onGet(this.wrapGet(() => this.state ? 100 : 0));
       service.getCharacteristic(this.Characteristic.PositionState).onGet(this.wrapGet(() => 2));
     }
-    this.registerListener(channel.address, "STATE", (raw) => {
-      this.state = Boolean(raw);
+    const applyState = (s) => {
+      this.state = s;
       if (svcType === this.Service.ContactSensor) {
         service.updateCharacteristic(
           this.Characteristic.ContactSensorState,
-          this.state ? this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : this.Characteristic.ContactSensorState.CONTACT_DETECTED
+          s ? this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : this.Characteristic.ContactSensorState.CONTACT_DETECTED
         );
       } else {
-        const pct = this.state ? 100 : 0;
+        const pct = s ? 100 : 0;
         service.updateCharacteristic(this.Characteristic.CurrentPosition, pct);
         service.updateCharacteristic(this.Characteristic.TargetPosition, pct);
       }
-    });
+    };
+    this.registerListener(channel.address, "STATE", (raw) => applyState(Boolean(raw)));
+    this.ccu.getValue(channel.address, "STATE").then((raw) => applyState(Boolean(raw))).catch(() => void 0);
   }
 }
 const contactService = {

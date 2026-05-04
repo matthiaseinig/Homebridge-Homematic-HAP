@@ -12,6 +12,10 @@ class SmokeHandler extends AccessoryBase {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.SmokeDetected, this.toHapValue());
     });
+    this.ccu.getValue(channel.address, "STATE").then((raw) => {
+      this.detected = Boolean(raw);
+      service.updateCharacteristic(this.Characteristic.SmokeDetected, this.toHapValue());
+    }).catch(() => void 0);
   }
   toHapValue() {
     return this.detected ? this.Characteristic.SmokeDetected.SMOKE_DETECTED : this.Characteristic.SmokeDetected.SMOKE_NOT_DETECTED;

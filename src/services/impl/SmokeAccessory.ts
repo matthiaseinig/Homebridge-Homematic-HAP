@@ -20,6 +20,11 @@ class SmokeHandler extends AccessoryBase implements ChannelService {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.SmokeDetected, this.toHapValue());
     });
+
+    this.ccu.getValue(channel.address, 'STATE').then((raw) => {
+      this.detected = Boolean(raw);
+      service.updateCharacteristic(this.Characteristic.SmokeDetected, this.toHapValue());
+    }).catch(() => undefined);
   }
 
   private toHapValue(): number {

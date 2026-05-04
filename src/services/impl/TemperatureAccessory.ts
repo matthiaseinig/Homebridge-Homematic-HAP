@@ -31,6 +31,15 @@ class TemperatureHandler extends AccessoryBase implements ChannelService {
 
     this.registerListener(channel.address, 'TEMPERATURE', handle);
     this.registerListener(channel.address, 'ACTUAL_TEMPERATURE', handle);
+
+    // Try ACTUAL_TEMPERATURE first (climate-control devices), fall back to
+    // TEMPERATURE (weather sensors). Best-effort: if both fail, the
+    // accessory just stays at its default until the first push event.
+    this.ccu.getValue(channel.address, 'ACTUAL_TEMPERATURE')
+      .then(handle)
+      .catch(() => this.ccu.getValue(channel.address, 'TEMPERATURE')
+        .then(handle)
+        .catch(() => undefined));
   }
 }
 

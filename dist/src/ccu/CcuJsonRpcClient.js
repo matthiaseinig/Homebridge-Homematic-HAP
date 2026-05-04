@@ -161,6 +161,36 @@ class CcuJsonRpcClient {
       channelIds: (r.channelIds ?? []).map((c) => String(c))
     }));
   }
+  /**
+   * Discover the XML-RPC ports each CCU interface is actually listening on.
+   * On RaspberryMatic the BidCos-RF / HmIP-RF / VirtualDevices ports are
+   * exposed externally on a +30000 offset (32001 / 32010 / 39292), not the
+   * historical 2001 / 2010 / 9292 — those only bind on localhost. Querying
+   * the CCU avoids hard-coding the offset.
+   *
+   * Some CCUs return only a `url` like `xmlrpc://127.0.0.1:32001`; we parse
+   * the port out of either shape.
+   */
+  async listInterfaces() {
+    const raw = await this.call("Interface.listInterfaces");
+    const out = [];
+    for (const i of raw ?? []) {
+      const name = i.name ?? "";
+      if (!name) continue;
+      let port = typeof i.port === "number" ? i.port : Number.parseInt(String(i.port ?? ""), 10);
+      if (!Number.isFinite(port) || port <= 0) {
+        const u = parseUrlPort(i.url);
+        if (u !== void 0) {
+          port = u;
+        }
+      }
+      if (!Number.isFinite(port) || port <= 0) {
+        continue;
+      }
+      out.push({ name, port, url: i.url });
+    }
+    return out;
+  }
   async getInterfaceValue(interfaceName, address, valueKey) {
     return this.call("Interface.getValue", { interface: interfaceName, address, valueKey });
   }
@@ -286,6 +316,13 @@ function mapVariableValueType(type) {
     default:
       return 0;
   }
+}
+function parseUrlPort(url) {
+  if (!url) return void 0;
+  const m = url.match(/:(\d+)(?:\/|$)/);
+  if (!m) return void 0;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : void 0;
 }
 function asInterfaceId(name) {
   if (name === "BidCos-RF" || name === "HmIP-RF" || name === "BidCos-Wired" || name === "VirtualDevices" || name === "CUxD") {

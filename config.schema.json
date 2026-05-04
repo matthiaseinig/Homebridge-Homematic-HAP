@@ -96,17 +96,19 @@
       "variableMapping": {
         "type": "object",
         "properties": {
-          "name":    { "title": "Variable name", "type": "string" },
-          "service": { "title": "Service class", "type": "string" },
-          "settings":{ "title": "Settings",      "type": "object" }
+          "name":        { "title": "Variable name",   "type": "string" },
+          "displayName": { "title": "HomeKit name",    "type": "string" },
+          "service":     { "title": "Service class",   "type": "string" },
+          "settings":    { "title": "Settings",        "type": "object" }
         },
         "required": ["name"]
       },
       "programMapping": {
         "type": "object",
         "properties": {
-          "name":    { "title": "Program name",  "type": "string" },
-          "settings":{ "title": "Settings",      "type": "object" }
+          "name":        { "title": "Program name",  "type": "string" },
+          "displayName": { "title": "HomeKit name",  "type": "string" },
+          "settings":    { "title": "Settings",      "type": "object" }
         },
         "required": ["name"]
       }

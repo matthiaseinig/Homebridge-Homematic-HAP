@@ -125,7 +125,10 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       try {
         const uuid = this.api.hap.uuid.generate(`variable:${mapping.name}`);
         seen.add(uuid);
-        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings);
+        const legacyName = typeof mapping.settings?.name === 'string'
+          ? (mapping.settings.name as string) : undefined;
+        const dn = mapping.displayName ?? legacyName;
+        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, dn);
       } catch (err) {
         this.log.warn('Skipping variable %s: %s', mapping.name, (err as Error).message);
       }
@@ -135,7 +138,9 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       try {
         const uuid = this.api.hap.uuid.generate(`program:${mapping.name}`);
         seen.add(uuid);
-        await this.attachProgram(uuid, mapping.name);
+        const legacyName = typeof mapping.settings?.name === 'string'
+          ? (mapping.settings.name as string) : undefined;
+        await this.attachProgram(uuid, mapping.name, mapping.displayName ?? legacyName);
       } catch (err) {
         this.log.warn('Skipping program %s: %s', mapping.name, (err as Error).message);
       }
@@ -186,13 +191,26 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     }
 
     const channel: CcuChannel = await this.fetchChannel(address, mapping.name);
-    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, channel.name, {
+    // mapping.name is the user-customised HomeKit display name (set in the
+    // GUI or imported from hap-homematic). Falls back to the CCU's channel
+    // name when the user hasn't overridden it.
+    //
+    // Pre-0.1.5 imports stored the custom name nested under settings.name
+    // because the importer's drop-list excluded it. Pick it up from there
+    // so users don't have to re-import.
+    const settingsName = typeof mapping.settings?.name === 'string'
+      ? (mapping.settings.name as string)
+      : undefined;
+    const displayName = (mapping.name && mapping.name.length > 0 && mapping.name)
+      || (settingsName && settingsName.length > 0 ? settingsName : undefined)
+      || channel.name;
+    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, displayName, {
       kind: 'channel',
       id: address,
       service: def.key,
       subtype: mapping.subtype,
       settings: mapping.settings,
-      name: channel.name,
+      name: displayName,
     });
     const ctx: ServiceContext = {
       accessory,
@@ -211,6 +229,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     name: string,
     serviceKey: string | undefined,
     _settings: Record<string, unknown> | undefined,
+    displayName?: string,
   ): Promise<void> {
     /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
@@ -224,11 +243,12 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     }
     const explicit = serviceKey ? findVariableServiceByKey(serviceKey) : undefined;
     const def = explicit ?? pickVariableService(variable.valuetype);
-    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, name, {
+    const finalName = displayName && displayName.length > 0 ? displayName : name;
+    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, finalName, {
       kind: 'variable',
       id: name,
       service: def.key,
-      name,
+      name: finalName,
     });
     const ctx: ServiceContext = {
       accessory,
@@ -242,18 +262,19 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     this.managed.set(uuid, { accessory, handler });
   }
 
-  private async attachProgram(uuid: string, name: string): Promise<void> {
+  private async attachProgram(uuid: string, name: string, displayName?: string): Promise<void> {
     /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
       return;
     }
     /* c8 ignore stop */
     const def = findProgramServiceByKey('ProgramAccessory') ?? PROGRAM_SERVICE_DEFINITIONS[0]!;
-    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, name, {
+    const finalName = displayName && displayName.length > 0 ? displayName : name;
+    const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, finalName, {
       kind: 'program',
       id: name,
       service: def.key,
-      name,
+      name: finalName,
     });
     const ctx: ServiceContext = {
       accessory,
@@ -297,6 +318,20 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     const existing = this.cachedAccessories.get(uuid) as PlatformAccessory<T> | undefined;
     if (existing) {
       Object.assign(existing.context, context);
+      // If the user renamed the accessory (or imported a hap-homematic
+      // backup with custom HomeKit names), update the cached accessory's
+      // display name + AccessoryInformation Name characteristic so
+      // HomeKit shows the new name. Note: HomeKit caches the room/name
+      // pairing on the device side too, so this only takes effect for
+      // *newly-paired* HomeKit hubs — already-paired accessories keep
+      // the user's manual rename in the Home app.
+      if (existing.displayName !== displayName) {
+        existing.displayName = displayName;
+        const infoSvc = existing.getService(this.Service.AccessoryInformation);
+        if (infoSvc) {
+          infoSvc.setCharacteristic(this.Characteristic.Name, displayName);
+        }
+      }
       this.api.updatePlatformAccessories([existing]);
       return existing;
     }

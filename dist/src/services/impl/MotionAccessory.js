@@ -14,6 +14,10 @@ class MotionHandler extends AccessoryBase {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.MotionDetected, this.detected);
     });
+    this.ccu.getValue(channel.address, "MOTION").then((raw) => {
+      this.detected = Boolean(raw);
+      service.updateCharacteristic(this.Characteristic.MotionDetected, this.detected);
+    }).catch(() => void 0);
   }
 }
 const motionService = {

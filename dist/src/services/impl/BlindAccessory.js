@@ -40,6 +40,15 @@ class BlindHandler extends AccessoryBase {
         moving ? this.derivePositionState() : STATE_STOPPED
       );
     });
+    this.ccu.getValue(this.channelAddress, "LEVEL").then((raw) => {
+      const pct = normalizeLevelToPercent(raw);
+      if (pct === void 0) return;
+      this.current = pct;
+      this.target = pct;
+      service.updateCharacteristic(this.Characteristic.CurrentPosition, pct);
+      service.updateCharacteristic(this.Characteristic.TargetPosition, pct);
+      service.updateCharacteristic(this.Characteristic.PositionState, STATE_STOPPED);
+    }).catch(() => void 0);
   }
   derivePositionState() {
     if (this.target > this.current) {

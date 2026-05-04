@@ -49,6 +49,21 @@ class ThermostatHandler extends AccessoryBase {
         service.updateCharacteristic(this.Characteristic.TargetTemperature, v);
       }
     });
+    this.ccu.getValue(this.channelAddress, "ACTUAL_TEMPERATURE").then((raw) => {
+      const v = toFiniteNumber(raw);
+      if (v !== void 0) {
+        this.currentTemp = v;
+        service.updateCharacteristic(this.Characteristic.CurrentTemperature, v);
+      }
+    }).catch(() => void 0);
+    this.ccu.getValue(this.channelAddress, "SET_TEMPERATURE").then((raw) => {
+      const v = toFiniteNumber(raw);
+      if (v !== void 0) {
+        this.targetTemp = v;
+        service.updateCharacteristic(this.Characteristic.TargetTemperature, v);
+        service.updateCharacteristic(this.Characteristic.CurrentHeatingCoolingState, this.deriveCurrentMode());
+      }
+    }).catch(() => void 0);
   }
   deriveCurrentMode() {
     if (this.targetTemp <= 4.5) {

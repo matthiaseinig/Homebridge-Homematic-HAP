@@ -78,12 +78,14 @@ function importConfigJson(raw) {
       continue;
     }
     const subtype = mapping.Type ? SUBTYPE_ALIASES[mapping.Type] ?? SERVICE_DEFAULT_SUBTYPE[sourceService] : SERVICE_DEFAULT_SUBTYPE[sourceService];
+    const customName = typeof mapping.name === "string" && mapping.name.length > 0 ? mapping.name : void 0;
     channels.push({
       address,
+      name: customName,
       service,
       subtype,
       instance: typeof mapping.instance === "string" ? mapping.instance : void 0,
-      settings: dropKnownKeys(mapping, ["Service", "Type", "instance"])
+      settings: dropKnownKeys(mapping, ["Service", "Type", "instance", "name"])
     });
   }
   for (const name of config.variables ?? []) {
@@ -96,12 +98,14 @@ function importConfigJson(raw) {
     if (sourceService && !service) {
       warnings.push(`Could not map variable service "${sourceService}" for "${name}" \u2014 kept with default mapping`);
     }
+    const customName = typeof mapping.name === "string" && mapping.name.length > 0 ? mapping.name : void 0;
     variables.push({
       name,
+      displayName: customName,
       service,
       subtype: SERVICE_DEFAULT_SUBTYPE[sourceService],
       instance: typeof mapping.instance === "string" ? mapping.instance : void 0,
-      settings: dropKnownKeys(mapping, ["Service", "Type", "instance"])
+      settings: dropKnownKeys(mapping, ["Service", "Type", "instance", "name"])
     });
   }
   for (const name of config.programs ?? []) {
@@ -109,8 +113,10 @@ function importConfigJson(raw) {
       continue;
     }
     const mapping = config.mappings?.[name] ?? {};
+    const customName = typeof mapping.name === "string" && mapping.name.length > 0 ? mapping.name : void 0;
     programs.push({
       name,
+      displayName: customName,
       instance: typeof mapping.instance === "string" ? mapping.instance : void 0
     });
   }

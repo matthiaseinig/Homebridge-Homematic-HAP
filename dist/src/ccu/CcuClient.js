@@ -22,6 +22,10 @@ class CcuClient extends EventEmitter {
   watchdogTimer;
   lastEventAt = 0;
   started = false;
+  /** XML-RPC port discovered per interface from `Interface.listInterfaces`. */
+  discoveredPorts = /* @__PURE__ */ new Map();
+  /** address → interface map built from `Device.listAllDetail` at startup. */
+  addressInterface = /* @__PURE__ */ new Map();
   constructor(opts) {
     super();
     this.config = opts.config;
@@ -47,6 +51,8 @@ class CcuClient extends EventEmitter {
       return;
     }
     await this.eventServer.start();
+    await this.refreshInterfacePorts();
+    await this.refreshAddressInterfaceMap();
     const callbackHost = this.resolveCallbackHost();
     const callbackUrl = `http://${callbackHost}:${this.config.eventServer.port}`;
     for (const { id, flag } of ENABLED_INTERFACES) {
@@ -57,7 +63,7 @@ class CcuClient extends EventEmitter {
       const client = new RpcClient({
         interfaceId: id,
         host: this.config.ccuIp,
-        port: INTERFACE_PORTS[id],
+        port: this.discoveredPorts.get(id) ?? INTERFACE_PORTS[id],
         callbackUrl,
         callbackId,
         log: this.log.child(`rpc:${id}`)
@@ -72,6 +78,51 @@ class CcuClient extends EventEmitter {
     this.lastEventAt = Date.now();
     this.startWatchdog();
     this.started = true;
+  }
+  async refreshInterfacePorts() {
+    try {
+      const list = await this.api.listInterfaces();
+      for (const i of list) {
+        const id = mapInterfaceName(i.name);
+        if (id) {
+          this.discoveredPorts.set(id, i.port);
+          this.log.debug("Interface %s on port %d", id, i.port);
+        }
+      }
+    } catch (err) {
+      this.log.warn(
+        "Interface.listInterfaces failed (%s) \u2014 using default ports",
+        err.message
+      );
+    }
+  }
+  async refreshAddressInterfaceMap() {
+    try {
+      const devices = await this.api.listDevices();
+      const remember = (addr, intf) => {
+        if (!addr) return;
+        this.addressInterface.set(addr, intf);
+        const dot = addr.indexOf(".");
+        if (dot !== -1) {
+          this.addressInterface.set(addr.slice(dot + 1), intf);
+        } else {
+          this.addressInterface.set(`${intf}.${addr}`, intf);
+        }
+      };
+      for (const d of devices) {
+        if (!d.interface) continue;
+        remember(d.address, d.interface);
+        for (const c of d.channels) {
+          remember(c.address, d.interface);
+        }
+      }
+      this.log.debug("Indexed %d addresses across interfaces", this.addressInterface.size);
+    } catch (err) {
+      this.log.debug(
+        "listDevices for address-interface map failed: %s",
+        err.message
+      );
+    }
   }
   async stop() {
     if (!this.started) {
@@ -175,6 +226,15 @@ class CcuClient extends EventEmitter {
     }
   }
   interfaceForAddress(address) {
+    const direct = this.addressInterface.get(address);
+    if (direct) {
+      return direct;
+    }
+    const colon = address.indexOf(":");
+    if (colon !== -1) {
+      const deviceOnly = this.addressInterface.get(address.slice(0, colon));
+      if (deviceOnly) return deviceOnly;
+    }
     const dot = address.indexOf(".");
     const prefix = dot === -1 ? address : address.slice(0, dot);
     if (prefix === "BidCos-RF" || prefix === "HmIP-RF" || prefix === "BidCos-Wired" || prefix === "VirtualDevices" || prefix === "CUxD") {

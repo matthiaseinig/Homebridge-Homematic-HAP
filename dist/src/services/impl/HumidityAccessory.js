@@ -11,7 +11,7 @@ class HumidityHandler extends AccessoryBase {
   attach(channel) {
     const service = this.getOrAddService(this.Service.HumiditySensor, channel.name);
     service.getCharacteristic(this.Characteristic.CurrentRelativeHumidity).onGet(this.wrapGet(() => this.value));
-    this.registerListener(channel.address, "HUMIDITY", (raw) => {
+    const apply = (raw) => {
       const before = this.value;
       const v = toRanged(raw, 0, 100, before);
       if (v === before && raw !== before) {
@@ -19,7 +19,9 @@ class HumidityHandler extends AccessoryBase {
       }
       this.value = Math.round(v);
       service.updateCharacteristic(this.Characteristic.CurrentRelativeHumidity, this.value);
-    });
+    };
+    this.registerListener(channel.address, "HUMIDITY", apply);
+    this.ccu.getValue(channel.address, "HUMIDITY").then(apply).catch(() => void 0);
   }
 }
 const humidityService = {

@@ -73,6 +73,24 @@ class ThermostatHandler extends AccessoryBase implements ChannelService {
         service.updateCharacteristic(this.Characteristic.TargetTemperature, v);
       }
     });
+
+    // Pull initial state so the accessory reflects current values
+    // immediately rather than waiting for the next push event.
+    this.ccu.getValue(this.channelAddress, 'ACTUAL_TEMPERATURE').then((raw) => {
+      const v = toFiniteNumber(raw);
+      if (v !== undefined) {
+        this.currentTemp = v;
+        service.updateCharacteristic(this.Characteristic.CurrentTemperature, v);
+      }
+    }).catch(() => undefined);
+    this.ccu.getValue(this.channelAddress, 'SET_TEMPERATURE').then((raw) => {
+      const v = toFiniteNumber(raw);
+      if (v !== undefined) {
+        this.targetTemp = v;
+        service.updateCharacteristic(this.Characteristic.TargetTemperature, v);
+        service.updateCharacteristic(this.Characteristic.CurrentHeatingCoolingState, this.deriveCurrentMode());
+      }
+    }).catch(() => undefined);
   }
 
   private deriveCurrentMode(): number {

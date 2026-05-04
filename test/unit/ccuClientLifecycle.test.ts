@@ -139,3 +139,75 @@ describe('CcuClient setValue/getValue fallback to JSON-RPC', () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe('CcuClient runtime interface discovery', () => {
+  it('queries listInterfaces during start() and remembers ports', async () => {
+    const ccu = makeCcu();
+    const spy = vi.spyOn(ccu.api, 'listInterfaces').mockResolvedValue([
+      { name: 'BidCos-RF', port: 32001 },
+      { name: 'HmIP-RF', port: 32010 },
+      { name: 'VirtualDevices', port: 39292 },
+    ]);
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    await ccu.start();
+    expect(spy).toHaveBeenCalled();
+    // discoveredPorts is private — verify via Map size on the instance
+    const m = (ccu as unknown as { discoveredPorts: Map<string, number> }).discoveredPorts;
+    expect(m.get('BidCos-RF')).toBe(32001);
+    expect(m.get('HmIP-RF')).toBe(32010);
+    expect(m.get('VirtualDevices')).toBe(39292);
+    await ccu.stop();
+  });
+
+  it('start() does not crash when listInterfaces throws', async () => {
+    const ccu = makeCcu();
+    vi.spyOn(ccu.api, 'listInterfaces').mockRejectedValue(new Error('ccu-down'));
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    await expect(ccu.start()).resolves.toBeUndefined();
+    await ccu.stop();
+  });
+});
+
+describe('CcuClient address → interface lookup', () => {
+  it('routes addresses based on the discovered device tree, not the address prefix', async () => {
+    const ccu = makeCcu();
+    vi.spyOn(ccu.api, 'listInterfaces').mockResolvedValue([]);
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([
+      {
+        address: '0008DBE9971A0F',
+        name: 'Blind 1',
+        type: 'HmIP-FROLL',
+        interface: 'HmIP-RF',
+        channels: [
+          { address: '0008DBE9971A0F:1', index: 1, type: 'BLIND_VIRTUAL_RECEIVER', name: 'ch1' },
+          { address: '0008DBE9971A0F:4', index: 4, type: 'BLIND_VIRTUAL_RECEIVER', name: 'ch4' },
+        ],
+      },
+    ]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    await ccu.start();
+
+    const set = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    // Even though the address has no `HmIP-RF.` prefix, the lookup map
+    // (built from listDevices) sends it to HmIP-RF, not to BidCos-RF.
+    await ccu.setValue('0008DBE9971A0F:4', 'LEVEL', 0.5);
+    expect(set).toHaveBeenCalledWith('HmIP-RF', '0008DBE9971A0F:4', 'LEVEL', 'double', 0.5);
+
+    await ccu.stop();
+  });
+
+  it('falls back to prefix heuristic for addresses missing from the device tree', async () => {
+    const ccu = makeCcu();
+    vi.spyOn(ccu.api, 'listInterfaces').mockResolvedValue([]);
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    await ccu.start();
+
+    const set = vi.spyOn(ccu.api, 'setInterfaceValue').mockResolvedValue(undefined);
+    await ccu.setValue('HmIP-RF.000:1', 'STATE', true);
+    expect(set).toHaveBeenCalledWith('HmIP-RF', '000:1', 'STATE', 'boolean', true);
+    await ccu.stop();
+  });
+});

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as http from 'node:http';
 import { Buffer } from 'node:buffer';
@@ -225,6 +226,51 @@ describe('CcuJsonRpcClient.listVariables', () => {
     expect(vars[2]).toMatchObject({ valuetype: 16, value: 'hello' });
     expect(vars[3]?.enumValues).toEqual(['A', 'B']);
     expect(vars[4]?.value).toBe(0);
+  });
+});
+
+describe('CcuJsonRpcClient.listInterfaces', () => {
+  it('returns name + port for each interface', async () => {
+    s.nextResponse['Interface.listInterfaces'] = {
+      version: '1.1',
+      result: [
+        { name: 'BidCos-RF', port: 32001 },
+        { name: 'HmIP-RF', port: 32010 },
+      ],
+      error: null,
+    };
+    const c = makeClient({ username: 'u', password: 'p' });
+    const list = await c.listInterfaces();
+    expect(list).toEqual([
+      { name: 'BidCos-RF', port: 32001, url: undefined },
+      { name: 'HmIP-RF', port: 32010, url: undefined },
+    ]);
+  });
+
+  it('parses the port out of url when port field is missing', async () => {
+    s.nextResponse['Interface.listInterfaces'] = {
+      version: '1.1',
+      result: [{ name: 'HmIP-RF', url: 'xmlrpc://127.0.0.1:32010' }],
+      error: null,
+    };
+    const c = makeClient({ username: 'u', password: 'p' });
+    const list = await c.listInterfaces();
+    expect(list[0]?.port).toBe(32010);
+  });
+
+  it('drops entries with no usable port', async () => {
+    s.nextResponse['Interface.listInterfaces'] = {
+      version: '1.1',
+      result: [
+        { name: 'Broken', url: 'unknown://no-port' },
+        { name: '' },
+        { name: 'Good', port: '12345' },
+      ],
+      error: null,
+    };
+    const c = makeClient({ username: 'u', password: 'p' });
+    const list = await c.listInterfaces();
+    expect(list).toEqual([{ name: 'Good', port: 12345, url: undefined }]);
   });
 });
 

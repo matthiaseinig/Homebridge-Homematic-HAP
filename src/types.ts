@@ -62,7 +62,10 @@ export interface ChannelMapping {
 }
 
 export interface VariableMapping {
+  /** CCU variable name (the identifier used to look it up). */
   name: string;
+  /** Optional HomeKit display name override — defaults to the CCU name. */
+  displayName?: string;
   service?: string;
   subtype?: string;
   settings?: Record<string, unknown>;
@@ -70,7 +73,10 @@ export interface VariableMapping {
 }
 
 export interface ProgramMapping {
+  /** CCU program name (the identifier used to look it up). */
   name: string;
+  /** Optional HomeKit display name override — defaults to the CCU name. */
+  displayName?: string;
   settings?: Record<string, unknown>;
   instance?: string;
 }

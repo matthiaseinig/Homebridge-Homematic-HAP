@@ -70,6 +70,36 @@ describe('importConfigJson', () => {
     expect(r.meta.ccuIp).toBe('192.168.1.10');
     expect(r.meta.instances).toMatchObject({ i1: { name: 'main' } });
   });
+
+  it('lifts custom HomeKit name from hap-homematic mapping to top-level', () => {
+    const r = importConfigJson({
+      channels: ['HmIP.X:1'],
+      variables: ['VarA'],
+      programs: ['ProgA'],
+      mappings: {
+        'HmIP.X:1': { Service: 'HomeMaticSwitchAccessory', name: 'Living Room Lamp' },
+        VarA: { Service: 'HomeMaticVariableAccessory', name: 'Alarm State' },
+        ProgA: { name: 'Goodnight Routine' },
+      },
+    });
+    expect(r.channels[0]?.name).toBe('Living Room Lamp');
+    expect(r.channels[0]?.settings).not.toHaveProperty('name');
+    expect(r.variables[0]?.displayName).toBe('Alarm State');
+    expect(r.variables[0]?.settings).not.toHaveProperty('name');
+    expect(r.programs[0]?.displayName).toBe('Goodnight Routine');
+  });
+
+  it('leaves displayName/name undefined when no custom name is provided', () => {
+    const r = importConfigJson({
+      channels: ['HmIP.X:1'],
+      variables: ['V'],
+      programs: ['P'],
+      mappings: { 'HmIP.X:1': { Service: 'HomeMaticSwitchAccessory' }, V: {}, P: {} },
+    });
+    expect(r.channels[0]?.name).toBeUndefined();
+    expect(r.variables[0]?.displayName).toBeUndefined();
+    expect(r.programs[0]?.displayName).toBeUndefined();
+  });
 });
 
 describe('mergeIntoConfig', () => {

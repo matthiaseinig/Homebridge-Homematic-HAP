@@ -158,12 +158,19 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
     const subtype = mapping.Type
       ? SUBTYPE_ALIASES[mapping.Type] ?? SERVICE_DEFAULT_SUBTYPE[sourceService]
       : SERVICE_DEFAULT_SUBTYPE[sourceService];
+    // hap-homematic stores the user-customised HomeKit display name under
+    // `name`. Lift it to the top-level mapping field so the platform can
+    // use it as the accessory display name (otherwise we'd inherit the
+    // raw HomeMatic name from the CCU).
+    const customName = typeof mapping.name === 'string' && mapping.name.length > 0
+      ? mapping.name : undefined;
     channels.push({
       address,
+      name: customName,
       service,
       subtype,
       instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
-      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance']),
+      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance', 'name']),
     });
   }
 
@@ -177,12 +184,15 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
     if (sourceService && !service) {
       warnings.push(`Could not map variable service "${sourceService}" for "${name}" — kept with default mapping`);
     }
+    const customName = typeof mapping.name === 'string' && mapping.name.length > 0
+      ? mapping.name : undefined;
     variables.push({
       name,
+      displayName: customName,
       service,
       subtype: SERVICE_DEFAULT_SUBTYPE[sourceService],
       instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
-      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance']),
+      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance', 'name']),
     });
   }
 
@@ -191,8 +201,11 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
       continue;
     }
     const mapping = config.mappings?.[name] ?? {};
+    const customName = typeof mapping.name === 'string' && mapping.name.length > 0
+      ? mapping.name : undefined;
     programs.push({
       name,
+      displayName: customName,
       instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
     });
   }

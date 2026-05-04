@@ -56,6 +56,10 @@ export class CcuClient extends EventEmitter {
   private watchdogTimer: NodeJS.Timeout | undefined;
   private lastEventAt = 0;
   private started = false;
+  /** XML-RPC port discovered per interface from `Interface.listInterfaces`. */
+  private readonly discoveredPorts: Map<CcuInterfaceId, number> = new Map();
+  /** address → interface map built from `Device.listAllDetail` at startup. */
+  private readonly addressInterface: Map<string, CcuInterfaceId> = new Map();
 
   constructor(opts: CcuClientOptions) {
     super();
@@ -89,6 +93,15 @@ export class CcuClient extends EventEmitter {
     }
     await this.eventServer.start();
 
+    // Pull the actual XML-RPC ports from the CCU. RaspberryMatic exposes
+    // them at +30000 (32001/32010/39292), but a stock CCU3 still uses
+    // 2001/2010/9292 — so we trust whatever the CCU reports.
+    await this.refreshInterfacePorts();
+    // Build a lookup of channel-address → interface so setValue can route
+    // unprefixed addresses (the way they appear in hap-homematic backups)
+    // to the right XML-RPC client without guessing.
+    await this.refreshAddressInterfaceMap();
+
     const callbackHost = this.resolveCallbackHost();
     const callbackUrl = `http://${callbackHost}:${this.config.eventServer.port}`;
 
@@ -100,7 +113,7 @@ export class CcuClient extends EventEmitter {
       const client = new RpcClient({
         interfaceId: id,
         host: this.config.ccuIp,
-        port: INTERFACE_PORTS[id],
+        port: this.discoveredPorts.get(id) ?? INTERFACE_PORTS[id],
         callbackUrl,
         callbackId,
         log: this.log.child(`rpc:${id}`),
@@ -116,6 +129,53 @@ export class CcuClient extends EventEmitter {
     this.lastEventAt = Date.now();
     this.startWatchdog();
     this.started = true;
+  }
+
+  private async refreshInterfacePorts(): Promise<void> {
+    try {
+      const list = await this.api.listInterfaces();
+      for (const i of list) {
+        const id = mapInterfaceName(i.name);
+        if (id) {
+          this.discoveredPorts.set(id, i.port);
+          this.log.debug('Interface %s on port %d', id, i.port);
+        }
+      }
+    } catch (err) {
+      this.log.warn('Interface.listInterfaces failed (%s) — using default ports',
+        (err as Error).message);
+    }
+  }
+
+  private async refreshAddressInterfaceMap(): Promise<void> {
+    try {
+      const devices = await this.api.listDevices();
+      const remember = (addr: string, intf: CcuInterfaceId): void => {
+        if (!addr) return;
+        this.addressInterface.set(addr, intf);
+        // Also index without the interface prefix (some CCUs/backups
+        // store addresses as `HmIP-RF.0001D7...` while others store the
+        // bare `0001D7...:1`). Storing both forms means lookups succeed
+        // either way.
+        const dot = addr.indexOf('.');
+        if (dot !== -1) {
+          this.addressInterface.set(addr.slice(dot + 1), intf);
+        } else {
+          this.addressInterface.set(`${intf}.${addr}`, intf);
+        }
+      };
+      for (const d of devices) {
+        if (!d.interface) continue;
+        remember(d.address, d.interface);
+        for (const c of d.channels) {
+          remember(c.address, d.interface);
+        }
+      }
+      this.log.debug('Indexed %d addresses across interfaces', this.addressInterface.size);
+    } catch (err) {
+      this.log.debug('listDevices for address-interface map failed: %s',
+        (err as Error).message);
+    }
   }
 
   async stop(): Promise<void> {
@@ -233,6 +293,26 @@ export class CcuClient extends EventEmitter {
   }
 
   private interfaceForAddress(address: string): CcuInterfaceId {
+    // First check the device-discovery map (built at start()). This is the
+    // only source that always tells the truth — hap-homematic backups
+    // store bare addresses like "000123:1" with no interface prefix, and
+    // a HmIP serial like "000123" can't be distinguished from a BidCos
+    // serial without consulting the CCU.
+    const direct = this.addressInterface.get(address);
+    if (direct) {
+      return direct;
+    }
+    // Try without the channel suffix (`:N`) — `listDevices` returns both
+    // device- and channel-level addresses but external code may pass the
+    // device address only.
+    const colon = address.indexOf(':');
+    if (colon !== -1) {
+      const deviceOnly = this.addressInterface.get(address.slice(0, colon));
+      if (deviceOnly) return deviceOnly;
+    }
+    // Fall back to prefix heuristics. This matches the pre-discovery
+    // behavior so accessories created before start() completes still
+    // route somewhere reasonable.
     const dot = address.indexOf('.');
     const prefix = dot === -1 ? address : address.slice(0, dot);
     if (prefix === 'BidCos-RF' || prefix === 'HmIP-RF' || prefix === 'BidCos-Wired'

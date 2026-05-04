@@ -21,6 +21,7 @@ class TemperatureHandler extends AccessoryBase {
     };
     this.registerListener(channel.address, "TEMPERATURE", handle);
     this.registerListener(channel.address, "ACTUAL_TEMPERATURE", handle);
+    this.ccu.getValue(channel.address, "ACTUAL_TEMPERATURE").then(handle).catch(() => this.ccu.getValue(channel.address, "TEMPERATURE").then(handle).catch(() => void 0));
   }
 }
 const temperatureService = {

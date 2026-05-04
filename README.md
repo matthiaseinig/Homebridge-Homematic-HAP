@@ -98,15 +98,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 ## Install
 
-Until the plugin is published on npm, install straight from this repo
-(precompiled `dist/` is checked in for exactly this reason):
+Until the plugin is published on npm, install straight from this repo.
+Both the precompiled `dist/` and the bundled `homebridge-ui/server.js`
+are checked in, so the Homebridge host doesn't need a build step:
 
 ```bash
 npm install -g matthiaseinig/Homebridge-Homematic-HAP
 hb-service restart
 ```
 
-Once we publish to npm:
+Updating to a newer version is the same command — re-run it.
+
+Once published to npm:
 
 ```bash
 npm install -g homebridge-homematic-hap
@@ -115,6 +118,12 @@ npm install -g homebridge-homematic-hap
 > Run these on the Homebridge host. The Homebridge user already has
 > the privileges it needs — no `sudo` necessary on a default
 > Homebridge install.
+
+> Installing from a local clone? Use `npm install --install-links
+> /path/to/clone`. Plain `npm install /path` creates a symlink, and
+> `homebridge-ui/server.js` then runs from that source directory and
+> can't find its dependencies. `--install-links` forces a copy and
+> avoids the issue.
 
 ## Quick start
 

@@ -55,6 +55,20 @@ class BlindHandler extends AccessoryBase implements ChannelService {
         moving ? this.derivePositionState() : STATE_STOPPED,
       );
     });
+
+    // Pull initial position. Without this, the accessory shows 0 (closed)
+    // until the next CCU push event arrives — which for blinds may be
+    // hours away. Best-effort; we ignore errors so a missing-channel
+    // doesn't poison startup.
+    this.ccu.getValue(this.channelAddress, 'LEVEL').then((raw) => {
+      const pct = normalizeLevelToPercent(raw);
+      if (pct === undefined) return;
+      this.current = pct;
+      this.target = pct;
+      service.updateCharacteristic(this.Characteristic.CurrentPosition, pct);
+      service.updateCharacteristic(this.Characteristic.TargetPosition, pct);
+      service.updateCharacteristic(this.Characteristic.PositionState, STATE_STOPPED);
+    }).catch(() => undefined);
   }
 
   private derivePositionState(): number {

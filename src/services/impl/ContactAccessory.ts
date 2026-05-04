@@ -37,21 +37,29 @@ class ContactHandler extends AccessoryBase implements ChannelService {
         .onGet(this.wrapGet<number>(() => 2));
     }
 
-    this.registerListener(channel.address, 'STATE', (raw) => {
-      this.state = Boolean(raw);
+    const applyState = (s: boolean): void => {
+      this.state = s;
       if (svcType === this.Service.ContactSensor) {
         service.updateCharacteristic(
           this.Characteristic.ContactSensorState,
-          this.state
+          s
             ? this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED
             : this.Characteristic.ContactSensorState.CONTACT_DETECTED,
         );
       } else {
-        const pct = this.state ? 100 : 0;
+        const pct = s ? 100 : 0;
         service.updateCharacteristic(this.Characteristic.CurrentPosition, pct);
         service.updateCharacteristic(this.Characteristic.TargetPosition, pct);
       }
-    });
+    };
+
+    this.registerListener(channel.address, 'STATE', (raw) => applyState(Boolean(raw)));
+
+    // Best-effort initial pull so the sensor doesn't show "closed" until
+    // the next push event.
+    this.ccu.getValue(channel.address, 'STATE')
+      .then((raw) => applyState(Boolean(raw)))
+      .catch(() => undefined);
   }
 }
 

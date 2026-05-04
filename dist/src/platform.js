@@ -80,7 +80,9 @@ class HomematicPlatform {
       try {
         const uuid = this.api.hap.uuid.generate(`variable:${mapping.name}`);
         seen.add(uuid);
-        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings);
+        const legacyName = typeof mapping.settings?.name === "string" ? mapping.settings.name : void 0;
+        const dn = mapping.displayName ?? legacyName;
+        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, dn);
       } catch (err) {
         this.log.warn("Skipping variable %s: %s", mapping.name, err.message);
       }
@@ -89,7 +91,8 @@ class HomematicPlatform {
       try {
         const uuid = this.api.hap.uuid.generate(`program:${mapping.name}`);
         seen.add(uuid);
-        await this.attachProgram(uuid, mapping.name);
+        const legacyName = typeof mapping.settings?.name === "string" ? mapping.settings.name : void 0;
+        await this.attachProgram(uuid, mapping.name, mapping.displayName ?? legacyName);
       } catch (err) {
         this.log.warn("Skipping program %s: %s", mapping.name, err.message);
       }
@@ -128,13 +131,15 @@ class HomematicPlatform {
       throw new Error(`Unknown service: ${mapping.service}`);
     }
     const channel = await this.fetchChannel(address, mapping.name);
-    const accessory = this.getOrCreateAccessory(uuid, channel.name, {
+    const settingsName = typeof mapping.settings?.name === "string" ? mapping.settings.name : void 0;
+    const displayName = mapping.name && mapping.name.length > 0 && mapping.name || (settingsName && settingsName.length > 0 ? settingsName : void 0) || channel.name;
+    const accessory = this.getOrCreateAccessory(uuid, displayName, {
       kind: "channel",
       id: address,
       service: def.key,
       subtype: mapping.subtype,
       settings: mapping.settings,
-      name: channel.name
+      name: displayName
     });
     const ctx = {
       accessory,
@@ -147,7 +152,7 @@ class HomematicPlatform {
     handler.attach(channel);
     this.managed.set(uuid, { accessory, handler });
   }
-  async attachVariable(uuid, name, serviceKey, _settings) {
+  async attachVariable(uuid, name, serviceKey, _settings, displayName) {
     if (!this.ccu) {
       return;
     }
@@ -158,11 +163,12 @@ class HomematicPlatform {
     }
     const explicit = serviceKey ? findVariableServiceByKey(serviceKey) : void 0;
     const def = explicit ?? pickVariableService(variable.valuetype);
-    const accessory = this.getOrCreateAccessory(uuid, name, {
+    const finalName = displayName && displayName.length > 0 ? displayName : name;
+    const accessory = this.getOrCreateAccessory(uuid, finalName, {
       kind: "variable",
       id: name,
       service: def.key,
-      name
+      name: finalName
     });
     const ctx = {
       accessory,
@@ -175,16 +181,17 @@ class HomematicPlatform {
     handler.attach(variable);
     this.managed.set(uuid, { accessory, handler });
   }
-  async attachProgram(uuid, name) {
+  async attachProgram(uuid, name, displayName) {
     if (!this.ccu) {
       return;
     }
     const def = findProgramServiceByKey("ProgramAccessory") ?? PROGRAM_SERVICE_DEFINITIONS[0];
-    const accessory = this.getOrCreateAccessory(uuid, name, {
+    const finalName = displayName && displayName.length > 0 ? displayName : name;
+    const accessory = this.getOrCreateAccessory(uuid, finalName, {
       kind: "program",
       id: name,
       service: def.key,
-      name
+      name: finalName
     });
     const ctx = {
       accessory,
@@ -219,6 +226,13 @@ class HomematicPlatform {
     const existing = this.cachedAccessories.get(uuid);
     if (existing) {
       Object.assign(existing.context, context);
+      if (existing.displayName !== displayName) {
+        existing.displayName = displayName;
+        const infoSvc = existing.getService(this.Service.AccessoryInformation);
+        if (infoSvc) {
+          infoSvc.setCharacteristic(this.Characteristic.Name, displayName);
+        }
+      }
       this.api.updatePlatformAccessories([existing]);
       return existing;
     }

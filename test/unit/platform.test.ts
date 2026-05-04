@@ -180,6 +180,50 @@ describe('HomematicPlatform', () => {
     expect(registered || warned).toBe(true);
   });
 
+  it('uses the user-specified mapping.name as the HomeKit display name', async () => {
+    const log = makeLog();
+    const api = makeApi();
+    const config = {
+      platform: 'HomematicHap',
+      ccuIp: '127.0.0.1',
+      channels: [{ address: 'HmIP.0:1', service: 'SwitchAccessory', name: 'Living Room Lamp' }],
+    };
+    const platform = new HomematicPlatform(log, config, api as unknown as API);
+    const ccu = platform.getCcu()!;
+    vi.spyOn(ccu, 'start').mockResolvedValue(undefined);
+    vi.spyOn(ccu, 'listDevices').mockResolvedValue([
+      { address: 'HmIP.0', type: 'X', name: 'D', interface: 'HmIP-RF',
+        channels: [{ address: 'HmIP.0:1', index: 1, type: 'SWITCH', name: 'CCU Default Name' }] },
+    ]);
+    api.emit(APIEvent.DID_FINISH_LAUNCHING);
+    await flushAsync();
+    const acc = api.registered.find((a) => a.UUID === 'uuid:channel:HmIP.0:1') as
+      unknown as { displayName: string } | undefined;
+    expect(acc?.displayName).toBe('Living Room Lamp');
+  });
+
+  it('falls back to legacy settings.name when top-level mapping.name is missing', async () => {
+    const log = makeLog();
+    const api = makeApi();
+    const config = {
+      platform: 'HomematicHap',
+      ccuIp: '127.0.0.1',
+      channels: [{ address: 'HmIP.0:1', service: 'SwitchAccessory', settings: { name: 'Legacy HomeKit Name' } }],
+    };
+    const platform = new HomematicPlatform(log, config, api as unknown as API);
+    const ccu = platform.getCcu()!;
+    vi.spyOn(ccu, 'start').mockResolvedValue(undefined);
+    vi.spyOn(ccu, 'listDevices').mockResolvedValue([
+      { address: 'HmIP.0', type: 'X', name: 'D', interface: 'HmIP-RF',
+        channels: [{ address: 'HmIP.0:1', index: 1, type: 'SWITCH', name: 'CCU Name' }] },
+    ]);
+    api.emit(APIEvent.DID_FINISH_LAUNCHING);
+    await flushAsync();
+    const acc = api.registered.find((a) => a.UUID === 'uuid:channel:HmIP.0:1') as
+      unknown as { displayName: string } | undefined;
+    expect(acc?.displayName).toBe('Legacy HomeKit Name');
+  });
+
   it('updates an existing cached accessory instead of re-registering', async () => {
     const log = makeLog();
     const api = makeApi();

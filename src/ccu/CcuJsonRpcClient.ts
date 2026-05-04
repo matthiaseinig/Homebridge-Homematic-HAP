@@ -244,6 +244,40 @@ export class CcuJsonRpcClient {
     }));
   }
 
+  /**
+   * Discover the XML-RPC ports each CCU interface is actually listening on.
+   * On RaspberryMatic the BidCos-RF / HmIP-RF / VirtualDevices ports are
+   * exposed externally on a +30000 offset (32001 / 32010 / 39292), not the
+   * historical 2001 / 2010 / 9292 — those only bind on localhost. Querying
+   * the CCU avoids hard-coding the offset.
+   *
+   * Some CCUs return only a `url` like `xmlrpc://127.0.0.1:32001`; we parse
+   * the port out of either shape.
+   */
+  async listInterfaces(): Promise<Array<{ name: string; port: number; url?: string }>> {
+    interface RawInterface { name?: string; info?: string; port?: number | string; url?: string }
+    const raw = await this.call<RawInterface[]>('Interface.listInterfaces');
+    const out: Array<{ name: string; port: number; url?: string }> = [];
+    for (const i of raw ?? []) {
+      const name = i.name ?? '';
+      if (!name) continue;
+      let port = typeof i.port === 'number'
+        ? i.port
+        : Number.parseInt(String(i.port ?? ''), 10);
+      if (!Number.isFinite(port) || port <= 0) {
+        const u = parseUrlPort(i.url);
+        if (u !== undefined) {
+          port = u;
+        }
+      }
+      if (!Number.isFinite(port) || port <= 0) {
+        continue;
+      }
+      out.push({ name, port, url: i.url });
+    }
+    return out;
+  }
+
   async getInterfaceValue(interfaceName: string, address: string, valueKey: string): Promise<string> {
     return this.call<string>('Interface.getValue', { interface: interfaceName, address, valueKey });
   }
@@ -385,6 +419,15 @@ function mapVariableValueType(type: string | undefined): number {
     case 'ENUM': return 20;
     default: return 0;
   }
+}
+
+function parseUrlPort(url: string | undefined): number | undefined {
+  if (!url) return undefined;
+  // accept e.g. xmlrpc://127.0.0.1:32001/, http://host:80, binary://h:9292
+  const m = url.match(/:(\d+)(?:\/|$)/);
+  if (!m) return undefined;
+  const n = Number.parseInt(m[1]!, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function asInterfaceId(name: string): CcuInterfaceId {
