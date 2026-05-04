@@ -351,6 +351,7 @@ var HomematicHapUiServer = class extends HomebridgePluginUiServer {
         ccuIp: payload.ccuIp,
         useTls: payload.useTls,
         interfaces: payload.interfaces,
+        interfacePorts: payload.interfacePorts,
         ccuAuth: payload.ccuAuth,
         eventServer: payload.eventServer
       });
