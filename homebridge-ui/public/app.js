@@ -358,7 +358,7 @@ function channelTileHTML(r) {
       <div class="hgui-tile-pills">
         ${inHK ? `<span class="hgui-pill primary">${h(r.service ?? '?')}</span>` : '<span class="hgui-pill muted">not in HomeKit</span>'}
         ${r.subtype ? `<span class="hgui-pill">${h(r.subtype)}</span>` : ''}
-        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+        ${bridgeName ? `<span class="hgui-pill">on ${h(bridgeName)}</span>` : ''}
       </div>
     </div>`;
 }
@@ -480,7 +480,7 @@ function variableTileHTML(r) {
       <div class="hgui-tile-meta"><code>${h(r.name)}</code>${info ? ` · valuetype ${h(info.valuetype)}${info.unit ? ` (${h(info.unit)})` : ''} · current: ${h(String(info.value ?? '?'))}` : ''}</div>
       <div class="hgui-tile-pills">
         ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
-        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+        ${bridgeName ? `<span class="hgui-pill">on ${h(bridgeName)}</span>` : ''}
       </div>
     </div>`;
 }
@@ -588,7 +588,7 @@ function programTileHTML(r) {
       <div class="hgui-tile-meta"><code>${h(r.name)}</code></div>
       <div class="hgui-tile-pills">
         ${inHK ? '<span class="hgui-pill success">in HomeKit</span>' : '<span class="hgui-pill muted">not in HomeKit</span>'}
-        ${bridgeName ? `<span class="hgui-pill">🌉 ${h(bridgeName)}</span>` : ''}
+        ${bridgeName ? `<span class="hgui-pill">on ${h(bridgeName)}</span>` : ''}
       </div>
     </div>`;
 }
