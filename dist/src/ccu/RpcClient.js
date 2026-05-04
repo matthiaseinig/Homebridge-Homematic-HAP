@@ -50,7 +50,9 @@ class RpcClient {
       call: (method, params) => new Promise((resolve, reject) => {
         client.methodCall(method, params, (err, value) => {
           if (err) {
-            reject(new RpcError(`${method} failed`, err));
+            const e = err;
+            const detail = e.faultString ? `${e.faultString}${e.faultCode !== void 0 ? ` (${e.faultCode})` : ""}` : e.message ?? "unknown error";
+            reject(new RpcError(`${method} failed: ${detail}`, err));
           } else {
             resolve(value);
           }
