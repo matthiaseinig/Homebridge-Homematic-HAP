@@ -10,90 +10,89 @@
 -->
 
 <style>
+  /*
+    Theming policy: every color is sourced from a Bootstrap 5 CSS
+    variable (set on :root / [data-bs-theme="dark"] by the host).
+    NO hardcoded color fallbacks — when the host flips to dark mode
+    the host updates --bs-body-bg, --bs-body-color, --bs-border-color
+    et al, and our chrome follows automatically.
+
+    Tiles and cards use transparent backgrounds with a translucent
+    border so they read on both light and dark backgrounds without
+    needing an explicit fill.
+  */
+
   /* App chrome ----------------------------------------------------- */
-  #hgui-app { display: flex; flex-direction: column; min-height: 100vh; }
+  #hgui-app { display: flex; flex-direction: column; min-height: 100vh; color: var(--bs-body-color); }
   .hgui-header { display: flex; gap: 0.5rem; align-items: center; padding: 0.75rem 0; flex-wrap: wrap; }
   .hgui-header .hgui-brand { font-weight: 600; }
-  .hgui-header .hgui-version { color: var(--bs-secondary-color, #6c757d); font-size: 0.8rem; }
+  .hgui-header .hgui-version { color: var(--bs-secondary-color); font-size: 0.8rem; }
   .hgui-main { flex: 1; min-width: 0; }
 
-  .hgui-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color, #dee2e6); border-bottom: 1px solid var(--bs-border-color, #dee2e6); position: sticky; top: 0; background: var(--bs-body-bg); z-index: 10; }
+  .hgui-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color-translucent); border-bottom: 1px solid var(--bs-border-color-translucent); position: sticky; top: 0; background: var(--bs-body-bg); z-index: 10; }
   .hgui-toolbar .form-control, .hgui-toolbar .form-select { max-width: 280px; }
   .hgui-toolbar input.form-control { min-width: 200px; }
 
-  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color, #dee2e6); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .hgui-floating-bar { position: sticky; bottom: 0; background: var(--bs-body-bg); padding: 0.75rem 0; border-top: 1px solid var(--bs-border-color-translucent); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
   /* Tiles ---------------------------------------------------------- */
   /* Tile min-width drives how many fit per row. The iframe is hosted
      inside Bootstrap's modal-xl (1140 px); 280 px gives ~3 tiles per
      row at full width and degrades gracefully on narrower viewports. */
   .hgui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.75rem 0; }
-  .hgui-tile { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color, #dee2e6); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
-  .hgui-tile.muted { opacity: 0.65; }
+  .hgui-tile { background: transparent; color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
+  .hgui-tile.muted { opacity: 0.6; }
   .hgui-tile-head { display: flex; align-items: flex-start; gap: 0.5rem; }
-  .hgui-tile-name { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; word-break: break-word; }
+  .hgui-tile-name { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; word-break: break-word; color: var(--bs-body-color); }
   .hgui-tile-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
-  .hgui-tile-sub  { color: var(--bs-secondary-color, #6c757d); font-size: 0.875rem; }
-  .hgui-tile-meta { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: var(--bs-secondary-color, #6c757d); word-break: break-all; }
+  .hgui-tile-sub  { color: var(--bs-secondary-color); font-size: 0.875rem; }
+  .hgui-tile-meta { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: var(--bs-secondary-color); word-break: break-all; }
   .hgui-tile-pills { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-  .hgui-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.72rem; background: var(--bs-secondary-bg, #e9ecef); color: var(--bs-body-color); white-space: nowrap; }
-  .hgui-pill.primary  { background: var(--bs-primary, #0d6efd); color: #fff; }
-  .hgui-pill.success  { background: var(--bs-success, #198754); color: #fff; }
-  .hgui-pill.warning  { background: var(--bs-warning, #ffc107); color: #000; }
-  .hgui-pill.muted    { background: transparent; border: 1px dashed var(--bs-border-color, #dee2e6); color: var(--bs-secondary-color, #6c757d); }
+
+  /* Pills lean on Bootstrap's bg-* tokens so light/dark text contrast
+     is right in both themes. */
+  .hgui-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.72rem; background: var(--bs-secondary-bg); color: var(--bs-body-color); white-space: nowrap; border: 1px solid var(--bs-border-color-translucent); }
+  .hgui-pill.primary  { background: var(--bs-primary);  color: var(--bs-white, #fff);  border-color: transparent; }
+  .hgui-pill.success  { background: var(--bs-success);  color: var(--bs-white, #fff);  border-color: transparent; }
+  .hgui-pill.warning  { background: var(--bs-warning);  color: var(--bs-black, #000);  border-color: transparent; }
+  .hgui-pill.muted    { background: transparent; border: 1px dashed var(--bs-border-color-translucent); color: var(--bs-secondary-color); }
 
   /* Bridge tile (slightly different shape) -------------------------- */
   .hgui-bridge-tile .hgui-tile-actions { flex-wrap: wrap; }
 
   /* Empty / pager -------------------------------------------------- */
-  .hgui-empty { color: var(--bs-secondary-color, #6c757d); font-style: italic; padding: 2rem; text-align: center; border: 1px dashed var(--bs-border-color, #dee2e6); border-radius: 8px; margin-top: 1rem; }
+  .hgui-empty { color: var(--bs-secondary-color); font-style: italic; padding: 2rem; text-align: center; border: 1px dashed var(--bs-border-color-translucent); border-radius: 8px; margin-top: 1rem; }
   .hgui-pager { display: flex; gap: 0.25rem; align-items: center; justify-content: center; padding: 0.75rem 0; flex-wrap: wrap; }
 
   /* Cards (used in dashboard / settings) --------------------------- */
-  .hgui-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color, #dee2e6); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+  .hgui-card { background: transparent; color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
   .hgui-card h6 { margin-bottom: 0.5rem; }
-  .hgui-meta { color: var(--bs-secondary-color, #6c757d); font-size: 0.85rem; }
+  .hgui-meta { color: var(--bs-secondary-color); font-size: 0.85rem; }
 
   /* Form rows ------------------------------------------------------ */
   .hgui-form-row { display: grid; grid-template-columns: 180px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; align-items: start; }
   @media (max-width: 700px) { .hgui-form-row { grid-template-columns: 1fr; } }
-  .hgui-form-row label { padding-top: 0.5rem; font-weight: 500; }
-  .hgui-form-row .hgui-hint { color: var(--bs-secondary-color, #6c757d); font-size: 0.825rem; margin-top: 0.25rem; }
-
-  /* Custom modal (no Bootstrap JS dependency) ---------------------- */
-  .hgui-modal { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; }
-  .hgui-modal.show { display: flex; }
-  .hgui-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
-  .hgui-modal-dialog { position: relative; background: var(--bs-body-bg, #fff); color: var(--bs-body-color); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); width: min(720px, 92vw); max-height: 90vh; display: flex; flex-direction: column; }
-  .hgui-modal-dialog.large { width: min(960px, 95vw); }
-  .hgui-modal-header { padding: 0.85rem 1rem; border-bottom: 1px solid var(--bs-border-color, #dee2e6); display: flex; align-items: center; gap: 0.5rem; }
-  .hgui-modal-title { font-weight: 600; font-size: 1.05rem; flex: 1; }
-  .hgui-modal-close { background: transparent; border: 0; font-size: 1.4rem; line-height: 1; padding: 0.25rem 0.5rem; cursor: pointer; color: var(--bs-secondary-color, #6c757d); }
-  .hgui-modal-body { padding: 1rem; overflow-y: auto; flex: 1; }
-  .hgui-modal-footer { padding: 0.75rem 1rem; border-top: 1px solid var(--bs-border-color, #dee2e6); display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
-  .hgui-modal-footer .left { margin-right: auto; }
+  .hgui-form-row label { padding-top: 0.5rem; font-weight: 500; color: var(--bs-body-color); }
+  .hgui-form-row .hgui-hint { color: var(--bs-secondary-color); font-size: 0.825rem; margin-top: 0.25rem; }
 </style>
 
 <div id="hgui-app">
 
-  <!-- Header: brand, view dropdown, persistent action buttons --------- -->
+  <!-- Header: view dropdown + persistent action buttons --------------- -->
   <header class="hgui-header">
-    <div class="hgui-brand">homebridge-homematic-hap</div>
-    <span class="hgui-version" id="hgui-version-banner"></span>
-    <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
-      <select id="hgui-view-select" class="form-select form-select-sm" style="min-width: 200px">
-        <option value="dashboard">📊 Dashboard</option>
-        <option value="channels">💡 Channels</option>
-        <option value="variables">🔢 Variables</option>
-        <option value="programs">▶️ Programs</option>
-        <option value="bridges">🌉 Bridges</option>
-        <option value="import">📥 Import</option>
-        <option value="settings">⚙️ Settings</option>
-      </select>
-      <button id="hgui-discover-btn" class="btn btn-primary btn-sm">Discover</button>
-      <button id="hgui-test-btn" class="btn btn-outline-secondary btn-sm">Test CCU</button>
-      <span id="hgui-test-result" class="small"></span>
-    </div>
+    <select id="hgui-view-select" class="form-select form-select-sm" style="min-width: 200px; max-width: 220px">
+      <option value="dashboard">📊 Dashboard</option>
+      <option value="channels">💡 Channels</option>
+      <option value="variables">🔢 Variables</option>
+      <option value="programs">▶️ Programs</option>
+      <option value="bridges">🌉 Bridges</option>
+      <option value="import">📥 Import</option>
+      <option value="settings">⚙️ Settings</option>
+    </select>
+    <button id="hgui-discover-btn" class="btn btn-primary btn-sm">Discover</button>
+    <button id="hgui-test-btn" class="btn btn-outline-secondary btn-sm">Test CCU</button>
+    <span id="hgui-test-result" class="small"></span>
+    <span class="hgui-version ms-auto" id="hgui-version-banner"></span>
   </header>
 
   <main class="hgui-main">
