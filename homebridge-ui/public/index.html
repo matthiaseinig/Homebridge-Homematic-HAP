@@ -42,11 +42,15 @@
   /* Tile min-width drives how many fit per row. The iframe is hosted
      inside Bootstrap's modal-xl (1140 px); 280 px gives ~3 tiles per
      row at full width and degrades gracefully on narrower viewports. */
-  .hgui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.75rem 0; }
+  /* align-items: start keeps tiles their natural height — without it
+     CSS Grid stretches every tile in a row to the tallest, which made
+     short tiles' pills float vertically when a neighbor wrapped its
+     action buttons. */
+  .hgui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.75rem 0; align-items: start; }
   /* --bs-tertiary-bg adapts: a near-white in light mode (#f8f9fa)
      and a slightly-lighter dark in dark mode (#2b3035). Gives tiles
      subtle separation from the page background in either theme. */
-  .hgui-tile { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-template-rows: auto auto auto auto; gap: 0.35rem; }
+  .hgui-tile { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color-translucent); border-radius: 8px; padding: 0.85rem 1rem; display: grid; grid-auto-rows: auto; gap: 0.35rem; }
   /* Mute the textual content of un-configured tiles, but keep the
      action button (the "+ Add") at full opacity so it's obvious it
      can be clicked. CSS opacity is multiplicative through the tree,
@@ -75,8 +79,10 @@
   .hgui-pill.warning  { color: var(--bs-warning);  border-color: var(--bs-warning); }
   .hgui-pill.muted    { border-style: dashed; color: var(--bs-secondary-color); }
 
-  /* Bridge tile (slightly different shape) -------------------------- */
-  .hgui-bridge-tile .hgui-tile-actions { flex-wrap: wrap; }
+  /* Bridge tile: actions live on their own row below the body so they
+     don't squeeze the name into a narrow column when the tile is at
+     the smaller end of the auto-fill range. */
+  .hgui-bridge-buttons { display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.35rem; border-top: 1px solid var(--bs-border-color-translucent); }
 
   /* Empty / pager -------------------------------------------------- */
   .hgui-empty { color: var(--bs-secondary-color); font-style: italic; padding: 2rem; text-align: center; border: 1px dashed var(--bs-border-color-translucent); border-radius: 8px; margin-top: 1rem; }
@@ -117,5 +123,45 @@
     <div id="hgui-view-host"></div>
   </main>
 </div>
+
+<!--
+  Theme sync: the iframe is a separate document and doesn't inherit
+  the host's data-bs-theme automatically, so Bootstrap's CSS variables
+  default to the light palette and our tiles render near-white inside
+  a dark host. We mirror the host's html[data-bs-theme] (or .dark-mode
+  body class) onto our iframe, with prefers-color-scheme as the
+  fallback when cross-frame access is blocked. A MutationObserver
+  catches the user toggling theme without a reload.
+-->
+<script>
+  (function syncTheme() {
+    function read() {
+      try {
+        const parent = window.parent.document.documentElement;
+        const theme = parent.getAttribute('data-bs-theme')
+          || (window.parent.document.body?.classList?.contains('dark-mode') ? 'dark' : null)
+          || (parent.classList?.contains('dark-mode') ? 'dark' : null);
+        if (theme) return theme;
+      } catch (_) { /* cross-origin or sandboxed */ }
+      return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    function apply() {
+      const t = read();
+      document.documentElement.setAttribute('data-bs-theme', t);
+    }
+    apply();
+    try {
+      new MutationObserver(apply).observe(window.parent.document.documentElement, {
+        attributes: true, attributeFilter: ['data-bs-theme', 'class'],
+      });
+      if (window.parent.document.body) {
+        new MutationObserver(apply).observe(window.parent.document.body, {
+          attributes: true, attributeFilter: ['class'],
+        });
+      }
+    } catch (_) { /* ignore */ }
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', apply);
+  })();
+</script>
 
 <script type="module" src="app.js"></script>

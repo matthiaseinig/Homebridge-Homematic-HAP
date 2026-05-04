@@ -1,11 +1,14 @@
 {
   "name": "homebridge-homematic-hap",
   "displayName": "HomeMatic HAP",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Homebridge plugin for HomeMatic / HomematicIP devices with a full configuration GUI. Spiritual successor to thkl/hap-homematic, running as a Homebridge plugin instead of a CCU addon. Imports existing hap-homematic configurations.",
   "type": "module",
   "license": "Apache-2.0",
-  "author": "Matthias Einig <https://github.com/matthiaseinig>",
+  "author": {
+    "name": "mattein",
+    "url": "https://github.com/matthiaseinig"
+  },
   "contributors": [
     "thkl (original hap-homematic and homebridge-homematic author) <https://github.com/thkl>"
   ],

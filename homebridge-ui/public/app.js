@@ -62,10 +62,12 @@ const state = {
   discovered: { devices: [], variables: [], programs: [], rooms: [] },
   services: { channelServices: [], variableServices: [] },
   ui: {
-    search: { channels: '', variables: '', programs: '', picker: '' },
-    filter: { channels: 'configured', variables: 'configured', programs: 'configured' }, // configured | all | unconfigured
-    sort:   { channels: 'name', variables: 'name', programs: 'name' },                    // name | address | type | bridge
-    page:   { channels: 1, variables: 1, programs: 1, picker: 1 },
+    search:        { channels: '',           variables: '',           programs: '',           picker: '' },
+    filter:        { channels: 'configured', variables: 'configured', programs: 'configured' }, // configured | all | unconfigured
+    filterType:    { channels: 'all' },                                                          // CCU channel type, e.g. SWITCH_VIRTUAL_RECEIVER, or 'all'
+    filterBridge:  { channels: 'all',        variables: 'all',        programs: 'all' },         // bridge index as string, or 'all'
+    sort:          { channels: 'name',       variables: 'name',       programs: 'name' },        // name | address | type | bridge
+    page:          { channels: 1,            variables: 1,            programs: 1,            picker: 1 },
   },
   pluginVersion: 'unknown',
 };
@@ -184,6 +186,13 @@ function viewChannels(host) {
   // attach event handlers ONCE here. Subsequent state changes only
   // call drawChannelRows(), which mutates the rows host — so the
   // search input never gets recreated, never loses focus.
+  // Build the per-tab type/bridge filter option lists. Channel types
+  // are taken from the discovered device tree so the dropdown reflects
+  // what's actually on this CCU (not a static list); bridges from the
+  // current state.blocks so child bridges added later show up.
+  const channelTypes = new Set();
+  for (const d of state.discovered.devices) for (const c of d.channels) if (c.type) channelTypes.add(c.type);
+
   host.innerHTML = `
     <h4 class="my-3">Channels</h4>
     <div class="hgui-toolbar">
@@ -194,6 +203,14 @@ function viewChannels(host) {
         <option value="configured">Configured</option>
         <option value="all">All discovered</option>
         <option value="unconfigured">Not in HomeKit</option>
+      </select>
+      <select class="form-select" id="hgui-filterType-channels" title="Filter by channel type">
+        <option value="all">All types</option>
+        ${Array.from(channelTypes).sort().map((t) => `<option value="${h(t)}">${h(t)}</option>`).join('')}
+      </select>
+      <select class="form-select" id="hgui-filterBridge-channels" title="Filter by bridge">
+        <option value="all">All bridges</option>
+        ${state.blocks.map((b, bi) => `<option value="${bi}">${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
       </select>
       <select class="form-select" id="hgui-sort-channels" title="Sort by">
         <option value="name">Sort: HomeKit name</option>
@@ -208,8 +225,10 @@ function viewChannels(host) {
     <div id="hgui-rows-host"></div>
     <div id="hgui-pager-host"></div>
   `;
-  $('hgui-filter-channels').value = state.ui.filter.channels;
-  $('hgui-sort-channels').value   = state.ui.sort.channels;
+  $('hgui-filter-channels').value       = state.ui.filter.channels;
+  $('hgui-filterType-channels').value   = channelTypes.has(state.ui.filterType.channels) ? state.ui.filterType.channels : 'all';
+  $('hgui-filterBridge-channels').value = state.ui.filterBridge.channels;
+  $('hgui-sort-channels').value         = state.ui.sort.channels;
 
   $('hgui-search-channels').addEventListener('input', (e) => {
     state.ui.search.channels = e.target.value;
@@ -218,6 +237,16 @@ function viewChannels(host) {
   });
   $('hgui-filter-channels').addEventListener('change', (e) => {
     state.ui.filter.channels = e.target.value;
+    state.ui.page.channels = 1;
+    drawChannelRows();
+  });
+  $('hgui-filterType-channels').addEventListener('change', (e) => {
+    state.ui.filterType.channels = e.target.value;
+    state.ui.page.channels = 1;
+    drawChannelRows();
+  });
+  $('hgui-filterBridge-channels').addEventListener('change', (e) => {
+    state.ui.filterBridge.channels = e.target.value;
     state.ui.page.channels = 1;
     drawChannelRows();
   });
@@ -270,6 +299,17 @@ function drawChannelRows() {
     }
   }
 
+  // Type filter.
+  const ftype = state.ui.filterType.channels;
+  if (ftype && ftype !== 'all') {
+    rows = rows.filter((r) => r._info?.channel?.type === ftype);
+  }
+  // Bridge filter.
+  const fbridge = state.ui.filterBridge.channels;
+  if (fbridge && fbridge !== 'all') {
+    const bi = parseInt(fbridge, 10);
+    rows = rows.filter((r) => r.bridgeIndex === bi);
+  }
   // Search.
   const q = state.ui.search.channels.trim().toLowerCase();
   if (q) {
@@ -389,6 +429,10 @@ function viewVariables(host) {
         <option value="all">All discovered</option>
         <option value="unconfigured">Not in HomeKit</option>
       </select>
+      <select class="form-select" id="hgui-filterBridge-variables" title="Filter by bridge">
+        <option value="all">All bridges</option>
+        ${state.blocks.map((b, bi) => `<option value="${bi}">${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
+      </select>
       <select class="form-select" id="hgui-sort-variables">
         <option value="name">Sort: HomeKit name</option>
         <option value="ccuname">Sort: CCU name</option>
@@ -400,10 +444,12 @@ function viewVariables(host) {
     <div id="hgui-rows-host"></div>
     <div id="hgui-pager-host"></div>
   `;
-  $('hgui-filter-variables').value = state.ui.filter.variables;
-  $('hgui-sort-variables').value = state.ui.sort.variables;
+  $('hgui-filter-variables').value       = state.ui.filter.variables;
+  $('hgui-filterBridge-variables').value = state.ui.filterBridge.variables;
+  $('hgui-sort-variables').value         = state.ui.sort.variables;
   $('hgui-search-variables').addEventListener('input', (e) => { state.ui.search.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
   $('hgui-filter-variables').addEventListener('change', (e) => { state.ui.filter.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
+  $('hgui-filterBridge-variables').addEventListener('change', (e) => { state.ui.filterBridge.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
   $('hgui-sort-variables').addEventListener('change', (e) => { state.ui.sort.variables = e.target.value; drawVariableRows(); });
   $('hgui-add-variable').addEventListener('click', () => {
     if (!state.discovered.variables.length) { homebridge.toast.warning('Run "Discover" first', 'Add variable'); return; }
@@ -429,6 +475,11 @@ function drawVariableRows() {
       return { name: v.name, displayName: existing?.displayName, bridgeIndex: existing?.bridgeIndex, isConfigured: !!existing, _info: v };
     });
     if (filter === 'unconfigured') rows = rows.filter((r) => !r.isConfigured);
+  }
+  const fbridge = state.ui.filterBridge.variables;
+  if (fbridge && fbridge !== 'all') {
+    const bi = parseInt(fbridge, 10);
+    rows = rows.filter((r) => r.bridgeIndex === bi);
   }
   const q = state.ui.search.variables.trim().toLowerCase();
   if (q) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(q));
@@ -498,6 +549,10 @@ function viewPrograms(host) {
         <option value="all">All discovered</option>
         <option value="unconfigured">Not in HomeKit</option>
       </select>
+      <select class="form-select" id="hgui-filterBridge-programs" title="Filter by bridge">
+        <option value="all">All bridges</option>
+        ${state.blocks.map((b, bi) => `<option value="${bi}">${h(b.name)}${bi === 0 ? ' (main)' : ''}</option>`).join('')}
+      </select>
       <select class="form-select" id="hgui-sort-programs">
         <option value="name">Sort: HomeKit name</option>
         <option value="ccuname">Sort: CCU name</option>
@@ -509,10 +564,12 @@ function viewPrograms(host) {
     <div id="hgui-rows-host"></div>
     <div id="hgui-pager-host"></div>
   `;
-  $('hgui-filter-programs').value = state.ui.filter.programs;
-  $('hgui-sort-programs').value = state.ui.sort.programs;
+  $('hgui-filter-programs').value       = state.ui.filter.programs;
+  $('hgui-filterBridge-programs').value = state.ui.filterBridge.programs;
+  $('hgui-sort-programs').value         = state.ui.sort.programs;
   $('hgui-search-programs').addEventListener('input', (e) => { state.ui.search.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
   $('hgui-filter-programs').addEventListener('change', (e) => { state.ui.filter.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
+  $('hgui-filterBridge-programs').addEventListener('change', (e) => { state.ui.filterBridge.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
   $('hgui-sort-programs').addEventListener('change', (e) => { state.ui.sort.programs = e.target.value; drawProgramRows(); });
   $('hgui-add-program').addEventListener('click', () => {
     if (!state.discovered.programs.length) { homebridge.toast.warning('Run "Discover" first', 'Add program'); return; }
@@ -538,6 +595,11 @@ function drawProgramRows() {
       return { name: p.name, displayName: existing?.displayName, bridgeIndex: existing?.bridgeIndex, isConfigured: !!existing, _info: p };
     });
     if (filter === 'unconfigured') rows = rows.filter((r) => !r.isConfigured);
+  }
+  const fbridge = state.ui.filterBridge.programs;
+  if (fbridge && fbridge !== 'all') {
+    const bi = parseInt(fbridge, 10);
+    rows = rows.filter((r) => r.bridgeIndex === bi);
   }
   const q = state.ui.search.programs.trim().toLowerCase();
   if (q) rows = rows.filter((r) => (r.name + ' ' + (r.displayName ?? '')).toLowerCase().includes(q));
@@ -621,20 +683,21 @@ function drawBridges() {
 
 function bridgeTileHTML(b, bi) {
   const isMain = bi === 0;
+  // Bridge tiles have up to three action buttons; we put them on
+  // their own row below the body so they don't shrink the name column
+  // or push the pills row down at narrow widths.
   return `
     <div class="hgui-tile hgui-bridge-tile">
-      <div class="hgui-tile-head">
-        <div class="hgui-tile-name">${h(b.name)}</div>
-        <div class="hgui-tile-actions">
-          <button class="btn btn-sm btn-outline-primary" data-rename-bridge="${bi}">Rename</button>
-          ${!isMain ? `<button class="btn btn-sm btn-outline-secondary" data-regen-bridge="${bi}">Regen identity</button>` : ''}
-          ${!isMain ? `<button class="btn btn-sm btn-outline-danger" data-remove-bridge="${bi}">Remove</button>` : ''}
-        </div>
-      </div>
+      <div class="hgui-tile-name">${h(b.name)}</div>
       <div class="hgui-tile-sub">${(b.channels ?? []).length} channels · ${(b.variables ?? []).length} vars · ${(b.programs ?? []).length} progs</div>
       <div class="hgui-tile-meta">${b._bridge ? `username <code>${h(b._bridge.username)}</code> · port <code>${h(b._bridge.port)}</code>` : '— uses main bridge identity —'}</div>
       <div class="hgui-tile-pills">
         ${isMain ? '<span class="hgui-pill primary">main</span>' : '<span class="hgui-pill">child</span>'}
+      </div>
+      <div class="hgui-bridge-buttons">
+        <button class="btn btn-sm btn-outline-primary" data-rename-bridge="${bi}">Rename</button>
+        ${!isMain ? `<button class="btn btn-sm btn-outline-secondary" data-regen-bridge="${bi}">Regen identity</button>` : ''}
+        ${!isMain ? `<button class="btn btn-sm btn-outline-danger" data-remove-bridge="${bi}">Remove</button>` : ''}
       </div>
     </div>`;
 }
