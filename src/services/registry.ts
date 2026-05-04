@@ -23,6 +23,7 @@ import type {
 import { switchService } from './impl/SwitchAccessory.js';
 import { dimmerService } from './impl/DimmerAccessory.js';
 import { blindService } from './impl/BlindAccessory.js';
+import { slatBlindService } from './impl/SlatBlindAccessory.js';
 import { thermostatService } from './impl/ThermostatAccessory.js';
 import { contactService } from './impl/ContactAccessory.js';
 import { motionService } from './impl/MotionAccessory.js';
@@ -32,6 +33,10 @@ import { humidityService } from './impl/HumidityAccessory.js';
 import { leakService } from './impl/LeakAccessory.js';
 import { programmableSwitchService } from './impl/ProgrammableSwitchAccessory.js';
 import { doorOpenerService } from './impl/DoorOpenerAccessory.js';
+import { lockService } from './impl/LockAccessory.js';
+import { colorTempDimmerService } from './impl/ColorTempDimmerAccessory.js';
+import { rgbLightService } from './impl/RgbLightAccessory.js';
+import { powerMeterService } from './impl/PowerMeterAccessory.js';
 import { variableSwitchService, variableLightService } from './impl/VariableAccessory.js';
 import { variableNumericSensorService } from './impl/VariableNumericSensorAccessory.js';
 import { programService } from './impl/ProgramAccessory.js';
@@ -40,6 +45,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   switchService,
   dimmerService,
   blindService,
+  slatBlindService,
   thermostatService,
   contactService,
   motionService,
@@ -49,6 +55,10 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   leakService,
   programmableSwitchService,
   doorOpenerService,
+  lockService,
+  colorTempDimmerService,
+  rgbLightService,
+  powerMeterService,
 ];
 
 export const VARIABLE_SERVICE_DEFINITIONS: VariableServiceDefinition[] = [

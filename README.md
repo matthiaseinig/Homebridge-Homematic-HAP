@@ -58,7 +58,9 @@ re-pairing every accessory in the Home app.
 
 ## Status
 
-Pre-1.0. The core architecture is in place:
+**1.0 — first stable release.** Architecture is settled, the public
+GitHub install is the supported path, and the user-visible surface
+is stable for the first time. The core:
 
 - Dynamic platform plugin, TypeScript ESM, Node 20 / 22 / 24
 - **JSON-RPC** control plane against the CCU's `/api/homematic.cgi`
@@ -67,13 +69,18 @@ Pre-1.0. The core architecture is in place:
   this lineage to use the modern API* — the predecessors all used the
   legacy `/tclrega.exe` ReGa-script endpoint, which has a per-user ACL
   hole that returns empty device lists on RaspberryMatic.
-- 14 service types covering common use cases:
-  Switch / Outlet / Lightbulb · Dimmer · WindowCovering (blind) ·
-  Thermostat · Contact / Door / Window · MotionSensor · SmokeSensor ·
-  LeakSensor · TemperatureSensor · HumiditySensor ·
-  StatelessProgrammableSwitch (push button) · LockMechanism (door
-  opener, momentary) · Variable as Switch / Lightbulb / numeric Sensor ·
-  Program as triggerable Switch
+- Runtime XML-RPC port discovery via `Interface.listInterfaces` so
+  RaspberryMatic's external `+30000` port offset is picked up
+  automatically; tolerant against non-spec `<META>` wrapper tags some
+  HmIP responses include.
+- **18 service types** covering common use cases: Switch / Outlet /
+  Lightbulb · Dimmer · ColorTempDimmer (tunable white) · RGB light
+  (continuous + HmIP-BSL discrete) · Window covering · Window covering
+  with slats · Thermostat · Contact / Door / Window · Motion · Smoke ·
+  Leak · Temperature · Humidity · StatelessProgrammableSwitch (push
+  button) · LockMechanism (door opener, momentary) · Lock (Keymatic) ·
+  Power / energy meter (Eve characteristics) · Variable as Switch /
+  Lightbulb / numeric Sensor · Program as triggerable Switch
 - Multi-bridge import: each `instance` in your hap-homematic config
   becomes its own Homebridge child bridge with a deterministic
   `_bridge: { username, port }` derived from the source UUID
@@ -85,14 +92,17 @@ Pre-1.0. The core architecture is in place:
   HomeKit boundary); auto-detect for the CCU `LEVEL` 0..1 vs 0..100
   firmware quirk
 
-Not yet shipped:
+Roadmap (post-1.0):
 
-- The full long-tail of hap-homematic's special-device accessories
-  (RGB lights, dual-white dimmer, weather stations, alarm system,
-  power meter, blind-with-slats, keymatic locks, …)
+- Weather stations (HmIP-SWO-PR/PL/B) and alarm-system service
 - CUxD interface (BIN-RPC) — config toggle exists but transport not
   yet wired
-- HomeKit Eve history (fakegato)
+- Eve history (fakegato) — deferred because fakegato-history pulls in
+  ~400 MB of `googleapis` transitively. Will require either a vendored
+  subset or upstream improvement.
+- A richer custom UI: per-accessory configuration dialog, drag-to-bridge
+  assignment in multi-bridge mode, accessory removal button, and a
+  bridge-management view.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 

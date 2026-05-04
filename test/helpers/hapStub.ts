@@ -22,6 +22,8 @@ export interface ServiceStub {
   getCharacteristic: Mock;
   setCharacteristic: Mock;
   updateCharacteristic: Mock;
+  addCharacteristic: Mock;
+  testCharacteristic: Mock;
 }
 
 export interface CharacteristicStub {
@@ -74,6 +76,8 @@ export function makeServiceStub(uuid: string, displayName = '', subtype?: string
     getCharacteristic: vi.fn() as Mock,
     setCharacteristic: vi.fn() as Mock,
     updateCharacteristic: vi.fn() as Mock,
+    addCharacteristic: vi.fn() as Mock,
+    testCharacteristic: vi.fn() as Mock,
   };
   s.getCharacteristic.mockImplementation((char: { UUID: string } | (new () => unknown)) => {
     const cuuid = (char as { UUID: string }).UUID ?? (char as { name: string }).name;
@@ -93,6 +97,31 @@ export function makeServiceStub(uuid: string, displayName = '', subtype?: string
     const c = s.getCharacteristic(char) as CharacteristicStub;
     c.value = value;
     return s;
+  });
+  // hap-nodejs Service.addCharacteristic accepts a Characteristic
+  // instance (or a constructor). The stub records it under its UUID and
+  // also wraps it as a CharacteristicStub for downstream introspection.
+  s.addCharacteristic.mockImplementation((char: { UUID?: string } | (new () => unknown)) => {
+    const instance = typeof char === 'function'
+      ? new (char as new () => { UUID?: string })()
+      : char;
+    const cuuid = (instance as { UUID?: string }).UUID
+      ?? (char as { UUID?: string }).UUID
+      ?? '';
+    let stub = s.characteristics.get(cuuid);
+    if (!stub) {
+      stub = makeCharacteristicStub(cuuid);
+      // Mirror any displayName / value the caller pre-populated.
+      const i = instance as { displayName?: string; value?: unknown };
+      if (i.displayName) stub.props.displayName = i.displayName;
+      if (i.value !== undefined) stub.value = i.value;
+      s.characteristics.set(cuuid, stub);
+    }
+    return stub;
+  });
+  s.testCharacteristic.mockImplementation((char: { UUID?: string } | string) => {
+    const cuuid = typeof char === 'string' ? char : char.UUID ?? '';
+    return s.characteristics.has(cuuid);
   });
   return s;
 }

@@ -18,17 +18,11 @@ if [ -f .git/MERGE_HEAD ] || [ -f .git/rebase-merge ] || [ -f .git/rebase-apply 
   exit 0
 fi
 
-# If the staged change is exclusively the version field of package.json,
-# don't double-bump.
-staged_files=$(git diff --cached --name-only)
-if [ "$staged_files" = "package.json" ] || [ "$staged_files" = "package.json
-package-lock.json" ]; then
-  staged_diff=$(git diff --cached -- package.json)
-  if echo "$staged_diff" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE '^[+-].*"version"' >/dev/null 2>&1; then
-    : # there are non-version changes, proceed with bump
-  else
-    exit 0
-  fi
+# If the staged diff already includes a version change in package.json,
+# the human/agent has explicitly chosen the version (e.g. a manual major
+# bump for v1.0.0). Don't override it.
+if git diff --cached -- package.json | grep -E '^[+-][[:space:]]*"version":' >/dev/null 2>&1; then
+  exit 0
 fi
 
 # Bump the patch version without tagging or auto-committing.
