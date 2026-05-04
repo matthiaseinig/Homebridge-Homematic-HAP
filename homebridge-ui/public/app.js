@@ -33,7 +33,11 @@ const sortBy = (arr, fn) => [...arr].sort((a, b) => {
 
 // ---------------------------------------------------------------- state
 
-const PAGE_SIZE = 30;
+// Per-page tile count. The host iframe auto-resizes its height to
+// fit our content, so a large page forces the parent modal to scroll
+// forever and pushes the pager / save buttons out of reach. 10 tiles
+// keeps every view a single screen tall on the user's box.
+const PAGE_SIZE = 10;
 
 const DEFAULT_BLOCK = () => ({
   platform: 'HomematicHap',
