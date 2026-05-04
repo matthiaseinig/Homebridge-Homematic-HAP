@@ -922,7 +922,13 @@ function subEditChannel(host, props) {
     ? state.services.channelServices.filter((s) => s.channelTypes.includes(info.channel.type))
     : state.services.channelServices;
   const draft = entry
-    ? { ...entry }
+    ? {
+        ...entry,
+        // Pre-v0.1.5 hap-homematic imports kept the user-chosen name in
+        // settings.name. Lift it to top-level `name` so the form is
+        // pre-filled and so saving normalises the entry.
+        name: effectiveHkName({ ...entry, _info: info }),
+      }
     : {
         address,
         name: info?.channel?.name ?? address,
