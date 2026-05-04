@@ -75,13 +75,23 @@ export class RpcClient {
     }
     // Late-load the runtime dep so unit tests can inject a transport
     // without resolving the homematic-xmlrpc native module path.
-    const mod = (await import('homematic-xmlrpc')) as {
-      createClient: (opts: { host: string; port: number }) => {
-        methodCall(method: string, params: unknown[],
-          cb: (err: Error | null, value: unknown) => void): void;
-      };
+    //
+    // homematic-xmlrpc is published as CommonJS; under ESM dynamic import
+    // its real `createClient` shows up on `.default`, not directly on the
+    // module namespace. Same gotcha we hit with iconv-lite earlier.
+    type CreateClientFn = (opts: { host: string; port: number }) => {
+      methodCall(method: string, params: unknown[],
+        cb: (err: Error | null, value: unknown) => void): void;
     };
-    const client = mod.createClient({ host: this.host, port: this.port });
+    const mod = (await import('homematic-xmlrpc')) as {
+      createClient?: CreateClientFn;
+      default?: { createClient?: CreateClientFn };
+    };
+    const createClient = mod.createClient ?? mod.default?.createClient;
+    if (typeof createClient !== 'function') {
+      throw new RpcError('homematic-xmlrpc module did not expose createClient');
+    }
+    const client = createClient({ host: this.host, port: this.port });
     this.transport = {
       call: (method, params) =>
         new Promise((resolve, reject) => {

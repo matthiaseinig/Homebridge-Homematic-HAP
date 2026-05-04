@@ -41,7 +41,11 @@ class RpcClient {
       return this.transport;
     }
     const mod = await import("homematic-xmlrpc");
-    const client = mod.createClient({ host: this.host, port: this.port });
+    const createClient = mod.createClient ?? mod.default?.createClient;
+    if (typeof createClient !== "function") {
+      throw new RpcError("homematic-xmlrpc module did not expose createClient");
+    }
+    const client = createClient({ host: this.host, port: this.port });
     this.transport = {
       call: (method, params) => new Promise((resolve, reject) => {
         client.methodCall(method, params, (err, value) => {
