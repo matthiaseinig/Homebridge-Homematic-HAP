@@ -168,6 +168,27 @@ describe('CcuClient runtime interface discovery', () => {
     await expect(ccu.start()).resolves.toBeUndefined();
     await ccu.stop();
   });
+
+  it('tolerates lower-case / aliased interface names from the CCU', async () => {
+    // Regression: v0.1.5 referenced `mapInterfaceName` without defining it,
+    // so any non-empty listInterfaces response triggered a ReferenceError
+    // that was swallowed by the try/catch and discarded all discovered
+    // ports. Verify the mapping accepts the canonical and aliased forms.
+    const ccu = makeCcu();
+    vi.spyOn(ccu.api, 'listInterfaces').mockResolvedValue([
+      { name: 'BIDCOS-RF', port: 32001 },
+      { name: 'hmip-rf', port: 32010 },
+      { name: 'CCU-Jack', port: 12345 }, // unknown — should be skipped, not crash
+    ]);
+    vi.spyOn(ccu.api, 'listDevices').mockResolvedValue([]);
+    vi.spyOn(ccu.eventServer, 'start').mockResolvedValue(undefined);
+    await ccu.start();
+    const m = (ccu as unknown as { discoveredPorts: Map<string, number> }).discoveredPorts;
+    expect(m.get('BidCos-RF')).toBe(32001);
+    expect(m.get('HmIP-RF')).toBe(32010);
+    expect(m.size).toBe(2); // CCU-Jack rejected
+    await ccu.stop();
+  });
 });
 
 describe('CcuClient address → interface lookup', () => {

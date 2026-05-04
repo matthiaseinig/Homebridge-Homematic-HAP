@@ -5,6 +5,7 @@
  * EventServer receives push events.
  */
 
+import { createRequire } from 'node:module';
 import type { PrefixedLogger } from '../util/logger.js';
 import type { CcuInterfaceId } from '../types.js';
 
@@ -91,6 +92,12 @@ export class RpcClient {
     if (typeof createClient !== 'function') {
       throw new RpcError('homematic-xmlrpc module did not expose createClient');
     }
+    // RaspberryMatic responses occasionally wrap data in non-spec
+    // elements like <META>...</META>. The bundled deserializer rejects
+    // any unknown tag with `Unknown XML-RPC tag '...'`, breaking init.
+    // Patch its onClosetag once to silently swallow unknown wrapping
+    // tags so legitimate non-spec metadata doesn't poison the response.
+    patchDeserializerForUnknownTags();
     const client = createClient({ host: this.host, port: this.port });
     this.transport = {
       call: (method, params) =>
@@ -167,5 +174,50 @@ export class RpcClient {
 
   isSubscribed(): boolean {
     return this.subscribed;
+  }
+}
+
+const KNOWN_XMLRPC_TAGS: ReadonlySet<string> = new Set([
+  'BOOLEAN', 'INT', 'I4', 'I8', 'DOUBLE', 'STRING', 'NAME',
+  'ARRAY', 'STRUCT', 'BASE64', 'DATETIME.ISO8601',
+  'VALUE', 'PARAMS', 'FAULT', 'METHODRESPONSE', 'METHODNAME',
+  'METHODCALL', 'NIL', 'DATA', 'PARAM', 'MEMBER',
+]);
+
+let deserializerPatched = false;
+
+/**
+ * Monkey-patch homematic-xmlrpc's Deserializer to ignore non-spec wrapping
+ * elements such as `<META>`. The default behaviour is to error out with
+ * `Unknown XML-RPC tag 'META'`, which RaspberryMatic's HmIP server can
+ * trigger on `init`. Idempotent — safe to call multiple times.
+ *
+ * Exported only for tests.
+ */
+export function patchDeserializerForUnknownTags(): void {
+  if (deserializerPatched) {
+    return;
+  }
+  try {
+    const requireFromHere = createRequire(import.meta.url);
+    const Deserializer = requireFromHere('homematic-xmlrpc/lib/deserializer') as {
+      prototype: { onClosetag: (el: string) => void; _patchedForUnknownTags?: boolean };
+    };
+    if (Deserializer.prototype._patchedForUnknownTags) {
+      deserializerPatched = true;
+      return;
+    }
+    const original = Deserializer.prototype.onClosetag;
+    Deserializer.prototype.onClosetag = function (this: unknown, el: string): void {
+      if (!KNOWN_XMLRPC_TAGS.has(el)) {
+        return;
+      }
+      original.call(this, el);
+    };
+    Deserializer.prototype._patchedForUnknownTags = true;
+    deserializerPatched = true;
+  } catch {
+    // If the module path changed, fall through silently. The original
+    // error will surface on the next init() and we'll know to revisit.
   }
 }

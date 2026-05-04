@@ -1,5 +1,8 @@
 // homebridge-ui/server.src.js
 import { Buffer } from "node:buffer";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve as resolvePath } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
 // node_modules/@homebridge/plugin-ui-utils/dist/server.js
 import process from "node:process";
@@ -165,6 +168,23 @@ import {
   VARIABLE_SERVICE_DEFINITIONS,
   servicesForChannelType
 } from "../dist/src/services/registry.js";
+{
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkgPath = resolvePath(here, "..", "package.json");
+  let version = "unknown";
+  try {
+    if (existsSync(pkgPath)) {
+      version = JSON.parse(readFileSync(pkgPath, "utf8")).version ?? "unknown";
+    }
+  } catch {
+  }
+  const distRoot = resolvePath(here, "..", "dist", "src");
+  const distPresent = existsSync(distRoot);
+  console.log(`[homebridge-homematic-hap UI] v${version} booting from ${here}; dist present: ${distPresent}`);
+  if (!distPresent) {
+    console.error(`[homebridge-homematic-hap UI] FATAL: ${distRoot} does not exist. The custom UI cannot start without the compiled dist/ folder. Re-install the plugin (npm install --install-links /path/to/clone) and restart Homebridge.`);
+  }
+}
 var MAX_BASE64_BYTES = 96 * 1024 * 1024;
 var UiLogger = class {
   info(...args) {
@@ -196,6 +216,7 @@ var HomematicHapUiServer = class extends HomebridgePluginUiServer {
     this.onRequest("/import-config-json", (payload) => this.handleImportConfigJson(payload));
     this.onRequest("/split-into-bridges", (payload) => this.handleSplitIntoBridges(payload));
     this.ready();
+    console.log("[homebridge-homematic-hap UI] handlers registered, ready signaled");
   }
   // --- handlers ----------------------------------------------------
   handleServices() {

@@ -11,7 +11,35 @@
  */
 
 import { Buffer } from 'node:buffer';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+
 import { HomebridgePluginUiServer, RequestError } from '@homebridge/plugin-ui-utils';
+
+// Boot-time diagnostic banner. homebridge-config-ui-x captures stdout of
+// the UI subprocess and surfaces it under "Custom UI logs" — and if the
+// user is just running `node server.js` to verify the install, this is
+// the first thing they see. If you DON'T see this line, the file isn't
+// reachable from the install path.
+{
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkgPath = resolvePath(here, '..', 'package.json');
+  let version = 'unknown';
+  try {
+    if (existsSync(pkgPath)) {
+      version = JSON.parse(readFileSync(pkgPath, 'utf8')).version ?? 'unknown';
+    }
+  } catch { /* ignore */ }
+  const distRoot = resolvePath(here, '..', 'dist', 'src');
+  const distPresent = existsSync(distRoot);
+  console.log(`[homebridge-homematic-hap UI] v${version} booting from ${here}; dist present: ${distPresent}`);
+  if (!distPresent) {
+    console.error(`[homebridge-homematic-hap UI] FATAL: ${distRoot} does not exist. ` +
+      'The custom UI cannot start without the compiled dist/ folder. ' +
+      'Re-install the plugin (npm install --install-links /path/to/clone) and restart Homebridge.');
+  }
+}
 
 import { CcuClient } from '../dist/src/ccu/CcuClient.js';
 import { resolveConfig, ConfigError } from '../dist/src/util/config.js';
@@ -53,6 +81,7 @@ class HomematicHapUiServer extends HomebridgePluginUiServer {
     this.onRequest('/split-into-bridges', (payload) => this.handleSplitIntoBridges(payload));
 
     this.ready();
+    console.log('[homebridge-homematic-hap UI] handlers registered, ready signaled');
   }
 
   // --- handlers ----------------------------------------------------

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { RpcClient, type RpcTransport } from '../../src/ccu/RpcClient.js';
+import { RpcClient, patchDeserializerForUnknownTags, type RpcTransport } from '../../src/ccu/RpcClient.js';
 import { PrefixedLogger } from '../../src/util/logger.js';
 import { makeLog } from '../helpers/hapStub.js';
 
@@ -90,5 +90,48 @@ describe('RpcClient', () => {
     await c.subscribe();
     await c.close();
     expect(t.close).toHaveBeenCalled();
+  });
+});
+
+describe('patchDeserializerForUnknownTags', () => {
+  it('makes the homematic-xmlrpc Deserializer ignore non-spec tags like META', async () => {
+    patchDeserializerForUnknownTags();
+    // Sanity check the patch by feeding it a methodResponse that contains a
+    // <META> wrapper around the value. Before the patch, the Deserializer
+    // would reject this with "Unknown XML-RPC tag 'META'".
+    const { createRequire } = await import('node:module');
+    const requireFromHere = createRequire(import.meta.url);
+    const Deserializer = requireFromHere('homematic-xmlrpc/lib/deserializer') as {
+      new (): {
+        deserializeMethodResponse(stream: NodeJS.ReadableStream,
+          cb: (err: Error | null, value?: unknown) => void): void;
+      };
+    };
+    const { Readable } = await import('node:stream');
+    const xml = '<?xml version="1.0"?>'
+      + '<methodResponse><params><param><value>'
+      + '<struct>'
+      + '<META><foo>bar</foo></META>'
+      + '<member><name>ok</name><value><boolean>1</boolean></value></member>'
+      + '</struct>'
+      + '</value></param></params></methodResponse>';
+    const stream = Readable.from([xml]);
+    const result = await new Promise<unknown>((resolve, reject) => {
+      const d = new Deserializer();
+      d.deserializeMethodResponse(stream as unknown as NodeJS.ReadableStream,
+        (err, value) => {
+          if (err) reject(err);
+          else resolve(value);
+        });
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('is idempotent when called multiple times', () => {
+    expect(() => {
+      patchDeserializerForUnknownTags();
+      patchDeserializerForUnknownTags();
+      patchDeserializerForUnknownTags();
+    }).not.toThrow();
   });
 });

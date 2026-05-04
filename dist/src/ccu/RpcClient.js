@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 const INTERFACE_PORTS = {
   "BidCos-RF": 2001,
   "HmIP-RF": 2010,
@@ -45,6 +46,7 @@ class RpcClient {
     if (typeof createClient !== "function") {
       throw new RpcError("homematic-xmlrpc module did not expose createClient");
     }
+    patchDeserializerForUnknownTags();
     const client = createClient({ host: this.host, port: this.port });
     this.transport = {
       call: (method, params) => new Promise((resolve, reject) => {
@@ -111,9 +113,57 @@ class RpcClient {
     return this.subscribed;
   }
 }
+const KNOWN_XMLRPC_TAGS = /* @__PURE__ */ new Set([
+  "BOOLEAN",
+  "INT",
+  "I4",
+  "I8",
+  "DOUBLE",
+  "STRING",
+  "NAME",
+  "ARRAY",
+  "STRUCT",
+  "BASE64",
+  "DATETIME.ISO8601",
+  "VALUE",
+  "PARAMS",
+  "FAULT",
+  "METHODRESPONSE",
+  "METHODNAME",
+  "METHODCALL",
+  "NIL",
+  "DATA",
+  "PARAM",
+  "MEMBER"
+]);
+let deserializerPatched = false;
+function patchDeserializerForUnknownTags() {
+  if (deserializerPatched) {
+    return;
+  }
+  try {
+    const requireFromHere = createRequire(import.meta.url);
+    const Deserializer = requireFromHere("homematic-xmlrpc/lib/deserializer");
+    if (Deserializer.prototype._patchedForUnknownTags) {
+      deserializerPatched = true;
+      return;
+    }
+    const original = Deserializer.prototype.onClosetag;
+    Deserializer.prototype.onClosetag = function(el) {
+      if (!KNOWN_XMLRPC_TAGS.has(el)) {
+        return;
+      }
+      original.call(this, el);
+    };
+    Deserializer.prototype._patchedForUnknownTags = true;
+    deserializerPatched = true;
+  } catch {
+  }
+}
 export {
   INTERFACE_PORTS,
   RpcClient,
-  RpcError
+  RpcError,
+  patchDeserializerForUnknownTags
 };
 //# sourceMappingURL=RpcClient.js.map

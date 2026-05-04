@@ -371,6 +371,30 @@ function stripInterfacePrefix(address: string): string {
   return dot === -1 ? address : address.slice(dot + 1);
 }
 
+/**
+ * Map the CCU's interface display name to our canonical CcuInterfaceId.
+ * RaspberryMatic returns names like "BidCos-RF", "HmIP-RF", "BidCos-Wired",
+ * "VirtualDevices", "CUxD" already — but some firmwares prefix with "HM-" or
+ * use lowercase. We accept the obvious aliases and reject anything else
+ * (notably "HmIPServer" used internally by HmIP-RF, which would otherwise
+ * be misrouted, and "CCU-Jack" which we don't support).
+ */
+function mapInterfaceName(name: string): CcuInterfaceId | undefined {
+  const n = name.trim();
+  if (n === 'BidCos-RF' || n === 'BidCos-Wired' || n === 'HmIP-RF'
+    || n === 'VirtualDevices' || n === 'CUxD') {
+    return n;
+  }
+  // Tolerate case differences and a couple of historical aliases.
+  const lower = n.toLowerCase();
+  if (lower === 'bidcos-rf' || lower === 'rf') return 'BidCos-RF';
+  if (lower === 'bidcos-wired' || lower === 'wired') return 'BidCos-Wired';
+  if (lower === 'hmip-rf' || lower === 'hmip' || lower === 'hmiprf') return 'HmIP-RF';
+  if (lower === 'virtualdevices' || lower === 'virtual') return 'VirtualDevices';
+  if (lower === 'cuxd') return 'CUxD';
+  return undefined;
+}
+
 function guessJsonRpcType(value: unknown): 'boolean' | 'string' | 'integer' | 'double' {
   if (typeof value === 'boolean') {
     return 'boolean';

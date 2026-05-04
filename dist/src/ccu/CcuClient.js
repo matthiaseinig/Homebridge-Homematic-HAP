@@ -288,6 +288,19 @@ function stripInterfacePrefix(address) {
   const dot = address.indexOf(".");
   return dot === -1 ? address : address.slice(dot + 1);
 }
+function mapInterfaceName(name) {
+  const n = name.trim();
+  if (n === "BidCos-RF" || n === "BidCos-Wired" || n === "HmIP-RF" || n === "VirtualDevices" || n === "CUxD") {
+    return n;
+  }
+  const lower = n.toLowerCase();
+  if (lower === "bidcos-rf" || lower === "rf") return "BidCos-RF";
+  if (lower === "bidcos-wired" || lower === "wired") return "BidCos-Wired";
+  if (lower === "hmip-rf" || lower === "hmip" || lower === "hmiprf") return "HmIP-RF";
+  if (lower === "virtualdevices" || lower === "virtual") return "VirtualDevices";
+  if (lower === "cuxd") return "CUxD";
+  return void 0;
+}
 function guessJsonRpcType(value) {
   if (typeof value === "boolean") {
     return "boolean";
