@@ -1,5 +1,8 @@
 # Build output
-dist/
+# (dist/ is intentionally tracked while the plugin isn't on npm yet, so
+# `npm install -g matthiaseinig/Homebridge-Homematic-HAP` works as a
+# one-liner without a build step. Once we publish to npm, this will go
+# back to /dist/.)
 *.tsbuildinfo
 
 # Dependencies

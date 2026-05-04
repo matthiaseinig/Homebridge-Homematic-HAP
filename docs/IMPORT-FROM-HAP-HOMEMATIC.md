@@ -22,11 +22,12 @@ save the resulting `*.tar.gz` file. The archive contains:
 ## Step 2 — Install this plugin
 
 ```bash
-npm install -g homebridge-homematic-hap
+npm install -g matthiaseinig/Homebridge-Homematic-HAP
+hb-service restart
 ```
 
-…or install via the Homebridge UI's plugin browser. Restart Homebridge
-once.
+…or install via the Homebridge UI's plugin browser. Once we're on npm,
+the install line becomes `npm install -g homebridge-homematic-hap`.
 
 ## Step 3 — Open the plugin's custom UI
 

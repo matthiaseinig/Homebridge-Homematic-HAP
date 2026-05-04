@@ -2,6 +2,12 @@
 
 [![CI](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/actions/workflows/ci.yml/badge.svg)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/matthiaseinig/Homebridge-Homematic-HAP?display_name=tag&sort=semver)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/releases)
+[![GitHub downloads](https://img.shields.io/github/downloads/matthiaseinig/Homebridge-Homematic-HAP/total)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/releases)
+[![GitHub stars](https://img.shields.io/github/stars/matthiaseinig/Homebridge-Homematic-HAP?style=flat)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/stargazers)
+[![Homebridge plugin](https://img.shields.io/badge/homebridge-plugin-blueviolet)](https://homebridge.io)
+[![npm](https://img.shields.io/npm/v/homebridge-homematic-hap)](https://www.npmjs.com/package/homebridge-homematic-hap)
+[![npm downloads](https://img.shields.io/npm/dt/homebridge-homematic-hap)](https://www.npmjs.com/package/homebridge-homematic-hap)
 
 A modern Homebridge plugin for **HomeMatic** and **HomematicIP** devices,
 with a full configuration GUI and a one-click migration path from
@@ -92,25 +98,23 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 ## Install
 
-The plugin is not yet on npm — install directly from this repo on your
-Homebridge host. **Clone + build + install locally** is the most
-reliable path; it works regardless of how the Homebridge environment
-configures `npm prepare`:
+Until the plugin is published on npm, install straight from this repo
+(precompiled `dist/` is checked in for exactly this reason):
 
 ```bash
-git clone https://github.com/matthiaseinig/Homebridge-Homematic-HAP.git /tmp/hb-hm-hap
-cd /tmp/hb-hm-hap
-npm install            # installs devDeps in the clone
-npm run build          # produces dist/
-sudo npm install -g .
-sudo hb-service restart   # or: sudo systemctl restart homebridge
+npm install -g matthiaseinig/Homebridge-Homematic-HAP
+hb-service restart
 ```
 
-Once on npm, this becomes a single line:
+Once we publish to npm:
 
 ```bash
-sudo npm install -g homebridge-homematic-hap   # not yet published
+npm install -g homebridge-homematic-hap
 ```
+
+> Run these on the Homebridge host. The Homebridge user already has
+> the privileges it needs — no `sudo` necessary on a default
+> Homebridge install.
 
 ## Quick start
 
