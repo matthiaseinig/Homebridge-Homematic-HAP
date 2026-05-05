@@ -90,7 +90,7 @@ class SlatBlindHandler extends AccessoryBase implements ChannelService {
 
     // Best-effort initial pulls — same apply paths as the LEVEL /
     // LEVEL_2 listeners above; tested via fireEvent there.
-    /* c8 ignore start */
+    /* v8 ignore start */
     this.ccu.getValue(this.channelAddress, 'LEVEL').then((raw) => {
       const pct = normalizeLevelToPercent(raw);
       if (pct === undefined) return;
@@ -110,7 +110,7 @@ class SlatBlindHandler extends AccessoryBase implements ChannelService {
       service.updateCharacteristic(this.Characteristic.CurrentHorizontalTiltAngle, this.currentTilt);
       service.updateCharacteristic(this.Characteristic.TargetHorizontalTiltAngle, this.targetTilt);
     }).catch(() => undefined);
-    /* c8 ignore stop */
+    /* v8 ignore stop */
   }
 
   private derivePositionState(): number {

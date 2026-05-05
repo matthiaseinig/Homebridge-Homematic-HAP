@@ -111,7 +111,7 @@ class GarageDoorHandler extends AccessoryBase implements ChannelService {
     // listener above — tested via fireEvent there. The async chain
     // here is ignored from coverage to avoid flaky promise-timing
     // tests.
-    /* c8 ignore start */
+    /* v8 ignore start */
     this.ccu.getValue(this.channelAddress, 'DOOR_STATE').then((raw) => {
       const v = typeof raw === 'number' ? raw : parseInt(String(raw ?? '-1'), 10);
       const next = this.mapCcuToHap(v);
@@ -124,7 +124,7 @@ class GarageDoorHandler extends AccessoryBase implements ChannelService {
         service.updateCharacteristic(this.Characteristic.TargetDoorState, this.target);
       }
     }).catch(() => undefined);
-    /* c8 ignore stop */
+    /* v8 ignore stop */
   }
 
   /** Translate CCU DOOR_STATE → HAP CurrentDoorState; undefined means "skip". */
