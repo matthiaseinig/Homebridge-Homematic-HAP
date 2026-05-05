@@ -440,7 +440,7 @@ describe('WeatherStationAccessory', () => {
     expect(getChar(rainSvc, 'LeakDetected').value).toBe(0);
   });
 
-  it('clamps illumination to HAP range and ignores junk temperature', () => {
+  it('clamps illumination to HAP range and ignores junk temperature', async () => {
     const env = makeEnv();
     const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
     weatherStationService.build(ctx).attach(wchannel);
@@ -451,7 +451,11 @@ describe('WeatherStationAccessory', () => {
     expect(getChar(lightSvc, 'CurrentAmbientLightLevel').value).toBe(100000);
 
     env.fireEvent(wchannel.address, 'TEMPERATURE', 'NaN');
-    expect(getChar(tempSvc, 'CurrentTemperature').value).toBe(20); // unchanged default
+    // Junk input is rejected, so updateCharacteristic was never called
+    // and the stub's `value` stays undefined; the handler still returns
+    // the in-memory default via the onGet path.
+    expect(getChar(tempSvc, 'CurrentTemperature').value).toBeUndefined();
+    expect(await getChar(tempSvc, 'CurrentTemperature').onGetHandler!()).toBe(20);
   });
 });
 
