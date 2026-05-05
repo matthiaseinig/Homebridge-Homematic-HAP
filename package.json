@@ -1,7 +1,7 @@
 {
   "name": "homebridge-homematic-hap",
   "displayName": "HomeMatic HAP",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Homebridge plugin for HomeMatic / HomematicIP devices with a full configuration GUI. Spiritual successor to thkl/hap-homematic, running as a Homebridge plugin instead of a CCU addon. Imports existing hap-homematic configurations.",
   "type": "module",
   "license": "Apache-2.0",

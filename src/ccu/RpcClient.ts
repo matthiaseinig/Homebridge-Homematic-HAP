@@ -35,6 +35,13 @@ export interface RpcClientOptions {
    * homematic-xmlrpc to dial the CCU port.
    */
   transport?: RpcTransport;
+  /**
+   * Skip the pre-init TCP reachability probe. Tests that mock
+   * `homematic-xmlrpc` via `vi.mock` rely on the module's mocked
+   * createClient and never actually open a socket; the probe would
+   * still try to connect to the configured port and fail.
+   */
+  skipProbe?: boolean;
 }
 
 export interface RpcTransport {
@@ -58,6 +65,7 @@ export class RpcClient {
   private readonly log: PrefixedLogger;
   private transport: RpcTransport | undefined;
   private readonly transportFactory?: RpcTransport;
+  private readonly skipProbe: boolean;
   private subscribed = false;
 
   constructor(opts: RpcClientOptions) {
@@ -68,6 +76,7 @@ export class RpcClient {
     this.callbackId = opts.callbackId;
     this.log = opts.log;
     this.transportFactory = opts.transport;
+    this.skipProbe = opts.skipProbe ?? false;
   }
 
   async ensureTransport(): Promise<RpcTransport> {
@@ -129,8 +138,10 @@ export class RpcClient {
     // because the homematic-xmlrpc client uses the kernel default connect
     // timeout (~2 min on Linux). A locked-down CCU firewall would otherwise
     // hang the platform start for two minutes per interface.
-    // The probe is skipped when a transport was injected for tests.
-    if (!this.transportFactory) {
+    // The probe is skipped when a transport was injected for tests, or
+    // when the caller explicitly opted out (skipProbe=true) — used by
+    // unit tests that mock homematic-xmlrpc via vi.mock.
+    if (!this.transportFactory && !this.skipProbe) {
       await this.probeReachable();
     }
     const t = await this.ensureTransport();

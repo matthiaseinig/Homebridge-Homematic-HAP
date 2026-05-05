@@ -172,6 +172,11 @@ export function makeHapStub() {
       LeakSensor: makeServiceClass('LeakSensor'),
       TemperatureSensor: makeServiceClass('TemperatureSensor'),
       HumiditySensor: makeServiceClass('HumiditySensor'),
+      LightSensor: makeServiceClass('LightSensor'),
+      LockMechanism: makeServiceClass('LockMechanism'),
+      GarageDoorOpener: makeServiceClass('GarageDoorOpener'),
+      StatelessProgrammableSwitch: makeServiceClass('StatelessProgrammableSwitch'),
+      Battery: makeServiceClass('Battery'),
     } as unknown as typeof Service,
     Characteristic: {
       On: makeCharacteristicClass('On'),
@@ -190,6 +195,16 @@ export function makeHapStub() {
       SmokeDetected: makeCharacteristicClass('SmokeDetected', { SMOKE_NOT_DETECTED: 0, SMOKE_DETECTED: 1 }),
       LeakDetected: makeCharacteristicClass('LeakDetected', { LEAK_NOT_DETECTED: 0, LEAK_DETECTED: 1 }),
       CurrentRelativeHumidity: makeCharacteristicClass('CurrentRelativeHumidity'),
+      CurrentAmbientLightLevel: makeCharacteristicClass('CurrentAmbientLightLevel'),
+      LockCurrentState: makeCharacteristicClass('LockCurrentState', { SECURED: 1, UNSECURED: 0, JAMMED: 2, UNKNOWN: 3 }),
+      LockTargetState: makeCharacteristicClass('LockTargetState', { SECURED: 1, UNSECURED: 0 }),
+      CurrentDoorState: makeCharacteristicClass('CurrentDoorState', { OPEN: 0, CLOSED: 1, OPENING: 2, CLOSING: 3, STOPPED: 4 }),
+      TargetDoorState: makeCharacteristicClass('TargetDoorState', { OPEN: 0, CLOSED: 1 }),
+      ObstructionDetected: makeCharacteristicClass('ObstructionDetected'),
+      ProgrammableSwitchEvent: makeCharacteristicClass('ProgrammableSwitchEvent', { SINGLE_PRESS: 0, DOUBLE_PRESS: 1, LONG_PRESS: 2 }),
+      StatusLowBattery: makeCharacteristicClass('StatusLowBattery', { BATTERY_LEVEL_NORMAL: 0, BATTERY_LEVEL_LOW: 1 }),
+      BatteryLevel: makeCharacteristicClass('BatteryLevel'),
+      ChargingState: makeCharacteristicClass('ChargingState', { NOT_CHARGING: 0, CHARGING: 1, NOT_CHARGEABLE: 2 }),
     } as unknown as typeof Characteristic,
   };
 }

@@ -226,7 +226,10 @@ describe('CcuClient interfacePorts override', () => {
 
     await ccu.start();
     // The startup log should announce port 2001 (override), not 32001 (discovery).
-    expect(infos.join('\n')).toMatch(/Using XML-RPC port 2001 for BidCos-RF \(config override\)/);
+    // PrefixedLogger emits printf-style fmt + args separately; the test
+    // captures them as `'fmt arg1 arg2 …'`, so the regex matches that
+    // joined form rather than a substituted message.
+    expect(infos.join('\n')).toMatch(/Using XML-RPC port .* for .* \(.*\) 2001 BidCos-RF config override/);
     await ccu.stop();
   });
 });

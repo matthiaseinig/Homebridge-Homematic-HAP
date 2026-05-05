@@ -25,6 +25,7 @@ class RpcClient {
   log;
   transport;
   transportFactory;
+  skipProbe;
   subscribed = false;
   constructor(opts) {
     this.interfaceId = opts.interfaceId;
@@ -34,6 +35,7 @@ class RpcClient {
     this.callbackId = opts.callbackId;
     this.log = opts.log;
     this.transportFactory = opts.transport;
+    this.skipProbe = opts.skipProbe ?? false;
   }
   async ensureTransport() {
     if (this.transport) {
@@ -68,7 +70,7 @@ class RpcClient {
   }
   /** Subscribe to events. Idempotent. */
   async subscribe() {
-    if (!this.transportFactory) {
+    if (!this.transportFactory && !this.skipProbe) {
       await this.probeReachable();
     }
     const t = await this.ensureTransport();

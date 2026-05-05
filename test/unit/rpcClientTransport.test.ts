@@ -36,6 +36,10 @@ function makeClient(): RpcClient {
     callbackUrl: 'http://example/cb',
     callbackId: 'cbid',
     log: new PrefixedLogger(makeLog(), 'rpc'),
+    // The vi.mock of homematic-xmlrpc replaces the methodCall path, so
+    // the test never opens a real socket — opt out of the pre-init TCP
+    // probe (which would still try 127.0.0.1:2001).
+    skipProbe: true,
   });
 }
 
