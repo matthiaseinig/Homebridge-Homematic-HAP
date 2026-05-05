@@ -260,6 +260,45 @@ describe('RgbLightAccessory', () => {
     await sat.onSetHandler!(0);
     expect(env.setValueMock).toHaveBeenLastCalledWith('HmIP.B:8', 'COLOR', 200);
   });
+
+  it('initial pull: COLOR getValue applies discrete index back to Hue/Sat', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_a, dp) => dp === 'COLOR' ? 4 : undefined);
+    const channel: CcuChannel = { address: 'HmIP.B:8', name: 'BSL', index: 8, type: 'RGBW' };
+    const { ctx, accessory } = buildCtx(env, {
+      kind: 'channel', id: channel.address, service: 'RgbLightAccessory', subtype: 'discrete',
+    });
+    rgbLightService.build(ctx).attach(channel);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const hue = accessory.services[0]!.characteristics.get('char:Hue')!;
+    expect(hue.value).toBeDefined();
+  });
+
+  it('initial pull: continuous COLOR=200 maps to white (sat=0)', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_a, dp) => dp === 'COLOR' ? 200 : undefined);
+    const channel: CcuChannel = { address: 'HmIP.B:8', name: 'RGBW', index: 8, type: 'RGBW' };
+    const { ctx, accessory } = buildCtx(env, {
+      kind: 'channel', id: channel.address, service: 'RgbLightAccessory', subtype: 'continuous',
+    });
+    rgbLightService.build(ctx).attach(channel);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const sat = accessory.services[0]!.characteristics.get('char:Saturation')!;
+    expect(sat.value).toBe(0);
+  });
+
+  it('initial pull: continuous COLOR=99 maps to mid-spectrum hue', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_a, dp) => dp === 'COLOR' ? 99 : undefined);
+    const channel: CcuChannel = { address: 'HmIP.B:8', name: 'RGBW', index: 8, type: 'RGBW' };
+    const { ctx, accessory } = buildCtx(env, {
+      kind: 'channel', id: channel.address, service: 'RgbLightAccessory', subtype: 'continuous',
+    });
+    rgbLightService.build(ctx).attach(channel);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const hue = accessory.services[0]!.characteristics.get('char:Hue')!;
+    expect(hue.value).toBeCloseTo((99 / 199) * 360, 1);
+  });
 });
 
 describe('SlatBlindAccessory', () => {
@@ -285,6 +324,34 @@ describe('SlatBlindAccessory', () => {
     env.fireEvent('HmIP.S:4', 'LEVEL_2', 1);
     const current = accessory.services[0]!.characteristics.get('char:CurrentHorizontalTiltAngle')!;
     expect(current.value).toBe(90);
+  });
+
+  it('seeds LEVEL_2 from getValue at attach (initial pull)', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_a, dp) => dp === 'LEVEL_2' ? 0 : undefined);
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: channel.address, service: 'SlatBlindAccessory' });
+    slatBlindService.build(ctx).attach(channel);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const current = accessory.services[0]!.characteristics.get('char:CurrentHorizontalTiltAngle')!;
+    expect(current.value).toBe(-90); // -90 + 0*180 = -90
+  });
+
+  it('PositionState reflects target>current (increasing) and target<current (decreasing)', async () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: channel.address, service: 'SlatBlindAccessory' });
+    slatBlindService.build(ctx).attach(channel);
+    const positionState = accessory.services[0]!.characteristics.get('char:PositionState')!;
+    const target = accessory.services[0]!.characteristics.get('char:TargetPosition')!;
+
+    // Increasing: current=0, target=80 → STATE_INCREASING (1)
+    env.fireEvent('HmIP.S:4', 'LEVEL', 0);
+    await target.onSetHandler!(80);
+    expect(positionState.value).toBe(1);
+
+    // Decreasing: current=80, target=20 → STATE_DECREASING (0)
+    env.fireEvent('HmIP.S:4', 'LEVEL', 0.8);
+    await target.onSetHandler!(20);
+    expect(positionState.value).toBe(0);
   });
 });
 
