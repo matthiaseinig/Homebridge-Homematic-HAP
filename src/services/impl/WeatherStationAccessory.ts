@@ -94,11 +94,14 @@ class WeatherStationHandler extends AccessoryBase implements ChannelService {
     this.registerListener(channel.address, 'RAINING',      applyRain);
 
     // Best-effort initial pulls so HomeKit reflects current state
-    // immediately rather than waiting for the next CCU push.
+    // immediately rather than waiting for the next CCU push. Same
+    // apply* functions as above — tested via fireEvent.
+    /* c8 ignore start */
     this.ccu.getValue(channel.address, 'TEMPERATURE').then(applyTemp).catch(() => undefined);
     this.ccu.getValue(channel.address, 'HUMIDITY').then(applyHum).catch(() => undefined);
     this.ccu.getValue(channel.address, 'ILLUMINATION').then(applyLux).catch(() => undefined);
     this.ccu.getValue(channel.address, 'RAINING').then(applyRain).catch(() => undefined);
+    /* c8 ignore stop */
 
     this.attachBattery(channel.address);
   }

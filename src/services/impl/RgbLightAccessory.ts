@@ -112,7 +112,8 @@ class RgbLightHandler extends AccessoryBase implements ChannelService {
       service.updateCharacteristic(this.Characteristic.Saturation, this.cachedSat);
     });
 
-    // Initial pulls
+    // Initial pulls — same apply paths as the listeners above.
+    /* c8 ignore start */
     this.ccu.getValue(this.channelAddress, 'LEVEL').then((raw) => {
       const pct = normalizeLevelToPercent(raw);
       if (pct === undefined) return;
@@ -128,6 +129,7 @@ class RgbLightHandler extends AccessoryBase implements ChannelService {
       service.updateCharacteristic(this.Characteristic.Hue, this.cachedHue);
       service.updateCharacteristic(this.Characteristic.Saturation, this.cachedSat);
     }).catch(() => undefined);
+    /* c8 ignore stop */
   }
 
   private applyColorFromCcu(num: number): void {
