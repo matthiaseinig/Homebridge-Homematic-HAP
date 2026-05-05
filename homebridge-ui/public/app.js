@@ -32,10 +32,10 @@ const $ = (id) => document.getElementById(id);
  * /test-connection result still updates the inline status text.
  */
 function toast(kind, msg, title) {
-  try { homebridge?.toast?.[kind]?.(msg ?? '', title ?? ''); } catch (_) { /* ignore */ }
+  try { homebridge?.toast?.[kind]?.(msg ?? '', title ?? ''); } catch { /* ignore */ }
 }
 function spinner(on) {
-  try { (on ? homebridge?.showSpinner : homebridge?.hideSpinner)?.call(homebridge); } catch (_) { /* ignore */ }
+  try { (on ? homebridge?.showSpinner : homebridge?.hideSpinner)?.call(homebridge); } catch { /* ignore */ }
 }
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);

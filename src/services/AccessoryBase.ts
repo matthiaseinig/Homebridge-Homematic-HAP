@@ -125,9 +125,12 @@ export abstract class AccessoryBase {
 
     const applyLow = (raw: unknown): void => {
       lowBat = raw === true || raw === 1 || raw === '1' || raw === 'true';
-      service.updateCharacteristic(this.Characteristic.StatusLowBattery,
-        lowBat ? this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-               : this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+      service.updateCharacteristic(
+        this.Characteristic.StatusLowBattery,
+        lowBat
+          ? this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+          : this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
+      );
     };
     const applyVoltage = (raw: unknown): void => {
       // HmIP devices nominally report 0..4 V; map 2.4..3.2 → 0..100 %.
