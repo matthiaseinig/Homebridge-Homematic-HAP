@@ -12,6 +12,7 @@ import { weatherStationService } from "./impl/WeatherStationAccessory.js";
 import { leakService } from "./impl/LeakAccessory.js";
 import { programmableSwitchService } from "./impl/ProgrammableSwitchAccessory.js";
 import { doorOpenerService } from "./impl/DoorOpenerAccessory.js";
+import { garageDoorService } from "./impl/GarageDoorAccessory.js";
 import { lockService } from "./impl/LockAccessory.js";
 import { colorTempDimmerService } from "./impl/ColorTempDimmerAccessory.js";
 import { rgbLightService } from "./impl/RgbLightAccessory.js";
@@ -34,6 +35,7 @@ const SERVICE_DEFINITIONS = [
   leakService,
   programmableSwitchService,
   doorOpenerService,
+  garageDoorService,
   lockService,
   colorTempDimmerService,
   rgbLightService,

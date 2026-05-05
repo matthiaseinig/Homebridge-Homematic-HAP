@@ -3,7 +3,12 @@ const PROGRAMMABLE_SWITCH_CHANNEL_TYPES = [
   "KEY",
   "KEY_TRANSCEIVER",
   "PUSH_BUTTON",
-  "BLIND_BUTTON"
+  "BLIND_BUTTON",
+  // Multi-channel input modules: HmIP-FCI6, HMIPW-DRI32. Each input
+  // channel exposes itself as MULTI_MODE_INPUT_TRANSMITTER and emits
+  // PRESS_SHORT / PRESS_LONG just like a remote, so the existing
+  // handler covers them without modification.
+  "MULTI_MODE_INPUT_TRANSMITTER"
 ];
 const SINGLE_PRESS = 0;
 const DOUBLE_PRESS = 1;
