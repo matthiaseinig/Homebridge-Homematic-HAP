@@ -25,6 +25,8 @@ class LeakHandler extends AccessoryBase implements ChannelService {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.LeakDetected, this.toHapValue());
     }).catch(() => undefined);
+
+    this.attachBattery(channel.address);
   }
 
   private toHapValue(): number {

@@ -35,6 +35,8 @@ class HumidityHandler extends AccessoryBase implements ChannelService {
     this.registerListener(channel.address, 'HUMIDITY', apply);
 
     this.ccu.getValue(channel.address, 'HUMIDITY').then(apply).catch(() => undefined);
+
+    this.attachBattery(channel.address);
   }
 }
 

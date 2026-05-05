@@ -17,8 +17,12 @@ class ThermostatHandler extends AccessoryBase {
   attach(channel) {
     this.channelAddress = channel.address;
     const service = this.getOrAddService(this.Service.Thermostat, channel.name);
+    const settings = this.accessory.context.settings ?? {};
+    const minTemp = typeof settings.minTemp === "number" && Number.isFinite(settings.minTemp) ? settings.minTemp : 4.5;
+    const maxTemp = typeof settings.maxTemp === "number" && Number.isFinite(settings.maxTemp) && settings.maxTemp > minTemp ? settings.maxTemp : 30.5;
+    const minStep = typeof settings.minStep === "number" && Number.isFinite(settings.minStep) && settings.minStep > 0 ? settings.minStep : 0.5;
     service.getCharacteristic(this.Characteristic.CurrentTemperature).setProps({ minValue: -50, maxValue: 100, minStep: 0.1 }).onGet(this.wrapGet(() => this.currentTemp));
-    service.getCharacteristic(this.Characteristic.TargetTemperature).setProps({ minValue: 4.5, maxValue: 30.5, minStep: 0.5 }).onGet(this.wrapGet(() => this.targetTemp)).onSet(this.wrapSet(async (value) => {
+    service.getCharacteristic(this.Characteristic.TargetTemperature).setProps({ minValue: minTemp, maxValue: maxTemp, minStep }).onGet(this.wrapGet(() => this.targetTemp)).onSet(this.wrapSet(async (value) => {
       this.targetTemp = value;
       await this.ccu.setValue(this.channelAddress, "SET_TEMPERATURE", value);
     }));
@@ -64,6 +68,7 @@ class ThermostatHandler extends AccessoryBase {
         service.updateCharacteristic(this.Characteristic.CurrentHeatingCoolingState, this.deriveCurrentMode());
       }
     }).catch(() => void 0);
+    this.attachBattery(channel.address);
   }
   deriveCurrentMode() {
     if (this.targetTemp <= 4.5) {

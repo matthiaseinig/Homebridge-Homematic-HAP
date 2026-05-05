@@ -24,12 +24,24 @@ class ThermostatHandler extends AccessoryBase implements ChannelService {
     this.channelAddress = channel.address;
     const service = this.getOrAddService(this.Service.Thermostat, channel.name);
 
+    // Read user-pinned target-temperature range; default to the CCU
+    // typical 4.5..30.5 °C, which is what RaspberryMatic exposes.
+    const settings = (this.accessory.context.settings ?? {}) as {
+      minTemp?: number; maxTemp?: number; minStep?: number;
+    };
+    const minTemp = typeof settings.minTemp === 'number' && Number.isFinite(settings.minTemp)
+      ? settings.minTemp : 4.5;
+    const maxTemp = typeof settings.maxTemp === 'number' && Number.isFinite(settings.maxTemp) && settings.maxTemp > minTemp
+      ? settings.maxTemp : 30.5;
+    const minStep = typeof settings.minStep === 'number' && Number.isFinite(settings.minStep) && settings.minStep > 0
+      ? settings.minStep : 0.5;
+
     service.getCharacteristic(this.Characteristic.CurrentTemperature)
       .setProps({ minValue: -50, maxValue: 100, minStep: 0.1 })
       .onGet(this.wrapGet<number>(() => this.currentTemp));
 
     service.getCharacteristic(this.Characteristic.TargetTemperature)
-      .setProps({ minValue: 4.5, maxValue: 30.5, minStep: 0.5 })
+      .setProps({ minValue: minTemp, maxValue: maxTemp, minStep })
       .onGet(this.wrapGet<number>(() => this.targetTemp))
       .onSet(this.wrapSet<number>(async (value) => {
         this.targetTemp = value;
@@ -91,6 +103,10 @@ class ThermostatHandler extends AccessoryBase implements ChannelService {
         service.updateCharacteristic(this.Characteristic.CurrentHeatingCoolingState, this.deriveCurrentMode());
       }
     }).catch(() => undefined);
+
+    // Thermostats are battery-powered (HmIP-eTRV-*, HmIP-WTH-*, etc.).
+    // Surface LOW_BAT as a HomeKit BatteryService.
+    this.attachBattery(channel.address);
   }
 
   private deriveCurrentMode(): number {

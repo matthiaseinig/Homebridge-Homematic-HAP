@@ -18,6 +18,7 @@ class MotionHandler extends AccessoryBase {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.MotionDetected, this.detected);
     }).catch(() => void 0);
+    this.attachBattery(channel.address);
   }
 }
 const motionService = {

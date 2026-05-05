@@ -27,6 +27,8 @@ class MotionHandler extends AccessoryBase implements ChannelService {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.MotionDetected, this.detected);
     }).catch(() => undefined);
+
+    this.attachBattery(channel.address);
   }
 }
 

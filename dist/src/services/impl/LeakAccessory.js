@@ -16,6 +16,7 @@ class LeakHandler extends AccessoryBase {
       this.detected = Boolean(raw);
       service.updateCharacteristic(this.Characteristic.LeakDetected, this.toHapValue());
     }).catch(() => void 0);
+    this.attachBattery(channel.address);
   }
   toHapValue() {
     return this.detected ? this.Characteristic.LeakDetected.LEAK_DETECTED : this.Characteristic.LeakDetected.LEAK_NOT_DETECTED;

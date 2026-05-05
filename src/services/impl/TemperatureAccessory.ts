@@ -40,6 +40,8 @@ class TemperatureHandler extends AccessoryBase implements ChannelService {
       .catch(() => this.ccu.getValue(channel.address, 'TEMPERATURE')
         .then(handle)
         .catch(() => undefined));
+
+    this.attachBattery(channel.address);
   }
 }
 

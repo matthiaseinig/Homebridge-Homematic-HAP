@@ -90,6 +90,65 @@ export abstract class AccessoryBase {
     };
   }
 
+  /**
+   * Attach a HAP BatteryService that mirrors the device-level LOW_BAT
+   * datapoint (and OPERATING_VOLTAGE / BATTERY_STATE if exposed) into
+   * HomeKit's StatusLowBattery + BatteryLevel characteristics.
+   *
+   * Battery datapoints live on the **device** channel (`:0`), not on
+   * any feature channel, so we strip the channel suffix from the
+   * address we were given.
+   *
+   * Best-effort: if the device doesn't actually expose a battery
+   * datapoint, the listeners are dormant and the service shows the
+   * default "battery OK" state. Mains-powered devices simply shouldn't
+   * call this.
+   */
+  protected attachBattery(featureChannelAddress: string): void {
+    const colon = featureChannelAddress.lastIndexOf(':');
+    const deviceAddress = colon === -1
+      ? `${featureChannelAddress}:0`
+      : `${featureChannelAddress.slice(0, colon)}:0`;
+    const service = this.getOrAddService(this.Service.Battery, undefined, 'battery');
+    let lowBat = false;
+    let level = 100;
+
+    service.getCharacteristic(this.Characteristic.StatusLowBattery)
+      .onGet(this.wrapGet<number>(() => lowBat
+        ? this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+        : this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL));
+    service.getCharacteristic(this.Characteristic.BatteryLevel)
+      .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
+      .onGet(this.wrapGet<number>(() => level));
+    service.getCharacteristic(this.Characteristic.ChargingState)
+      .onGet(() => this.Characteristic.ChargingState.NOT_CHARGEABLE);
+
+    const applyLow = (raw: unknown): void => {
+      lowBat = raw === true || raw === 1 || raw === '1' || raw === 'true';
+      service.updateCharacteristic(this.Characteristic.StatusLowBattery,
+        lowBat ? this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+               : this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+    };
+    const applyVoltage = (raw: unknown): void => {
+      // HmIP devices nominally report 0..4 V; map 2.4..3.2 → 0..100 %.
+      // Anything outside that range gets clamped. This is a heuristic;
+      // CCU does not surface a real % anywhere.
+      const v = typeof raw === 'number' ? raw : parseFloat(String(raw ?? ''));
+      if (!Number.isFinite(v)) return;
+      const pct = Math.min(100, Math.max(0, Math.round(((v - 2.4) / (3.2 - 2.4)) * 100)));
+      level = pct;
+      service.updateCharacteristic(this.Characteristic.BatteryLevel, pct);
+    };
+
+    this.registerListener(deviceAddress, 'LOW_BAT', applyLow);
+    this.registerListener(deviceAddress, 'LOWBAT', applyLow); // legacy spelling
+    this.registerListener(deviceAddress, 'OPERATING_VOLTAGE', applyVoltage);
+
+    // Best-effort initial pulls so HomeKit doesn't sit on default values.
+    this.ccu.getValue(deviceAddress, 'LOW_BAT').then(applyLow).catch(() => undefined);
+    this.ccu.getValue(deviceAddress, 'OPERATING_VOLTAGE').then(applyVoltage).catch(() => undefined);
+  }
+
   dispose(): void {
     while (this.disposers.length > 0) {
       const fn = this.disposers.pop();

@@ -35,6 +35,7 @@ class ContactHandler extends AccessoryBase {
     };
     this.registerListener(channel.address, "STATE", (raw) => applyState(Boolean(raw)));
     this.ccu.getValue(channel.address, "STATE").then((raw) => applyState(Boolean(raw))).catch(() => void 0);
+    this.attachBattery(channel.address);
   }
 }
 const contactService = {

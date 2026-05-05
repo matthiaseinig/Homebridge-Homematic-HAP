@@ -22,6 +22,7 @@ class HumidityHandler extends AccessoryBase {
     };
     this.registerListener(channel.address, "HUMIDITY", apply);
     this.ccu.getValue(channel.address, "HUMIDITY").then(apply).catch(() => void 0);
+    this.attachBattery(channel.address);
   }
 }
 const humidityService = {

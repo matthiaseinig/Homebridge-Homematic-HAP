@@ -30,6 +30,7 @@ import { motionService } from './impl/MotionAccessory.js';
 import { smokeService } from './impl/SmokeAccessory.js';
 import { temperatureService } from './impl/TemperatureAccessory.js';
 import { humidityService } from './impl/HumidityAccessory.js';
+import { weatherStationService } from './impl/WeatherStationAccessory.js';
 import { leakService } from './impl/LeakAccessory.js';
 import { programmableSwitchService } from './impl/ProgrammableSwitchAccessory.js';
 import { doorOpenerService } from './impl/DoorOpenerAccessory.js';
@@ -52,6 +53,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   smokeService,
   temperatureService,
   humidityService,
+  weatherStationService,
   leakService,
   programmableSwitchService,
   doorOpenerService,

@@ -60,6 +60,8 @@ class ContactHandler extends AccessoryBase implements ChannelService {
     this.ccu.getValue(channel.address, 'STATE')
       .then((raw) => applyState(Boolean(raw)))
       .catch(() => undefined);
+
+    this.attachBattery(channel.address);
   }
 }
 
