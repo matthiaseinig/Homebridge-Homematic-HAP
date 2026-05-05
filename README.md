@@ -6,6 +6,8 @@
 [![GitHub downloads](https://img.shields.io/github/downloads/matthiaseinig/Homebridge-Homematic-HAP/total)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/releases)
 [![GitHub stars](https://img.shields.io/github/stars/matthiaseinig/Homebridge-Homematic-HAP?style=flat)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/stargazers)
 [![Homebridge plugin](https://img.shields.io/badge/homebridge-plugin-blueviolet)](https://homebridge.io)
+[![Homebridge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmatthiaseinig%2FHomebridge-Homematic-HAP%2Fmain%2Fpackage.json&query=%24.engines.homebridge&label=homebridge&color=blueviolet&logo=homebridge&logoColor=white)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/blob/main/package.json)
+[![Node](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmatthiaseinig%2FHomebridge-Homematic-HAP%2Fmain%2Fpackage.json&query=%24.engines.node&label=node&color=339933&logo=nodedotjs&logoColor=white)](https://github.com/matthiaseinig/Homebridge-Homematic-HAP/blob/main/package.json)
 [![npm](https://img.shields.io/npm/v/homebridge-homematic-hap)](https://www.npmjs.com/package/homebridge-homematic-hap)
 [![npm downloads](https://img.shields.io/npm/dt/homebridge-homematic-hap)](https://www.npmjs.com/package/homebridge-homematic-hap)
 

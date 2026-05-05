@@ -24,6 +24,19 @@
 // ---------------------------------------------------------------- helpers
 
 const $ = (id) => document.getElementById(id);
+/**
+ * Defensive wrapper around homebridge.toast.* — the host's toast API
+ * occasionally throws "Cannot read properties of undefined (reading
+ * '_postMessage')" when the parent IPC channel is in a transient
+ * state (observed mid-modal-resize). Swallow those so a successful
+ * /test-connection result still updates the inline status text.
+ */
+function toast(kind, msg, title) {
+  try { homebridge?.toast?.[kind]?.(msg ?? '', title ?? ''); } catch (_) { /* ignore */ }
+}
+function spinner(on) {
+  try { (on ? homebridge?.showSpinner : homebridge?.hideSpinner)?.call(homebridge); } catch (_) { /* ignore */ }
+}
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const sortBy = (arr, fn) => [...arr].sort((a, b) => {
@@ -256,7 +269,7 @@ function viewChannels(host) {
   });
   $('hgui-add-channel').addEventListener('click', () => {
     if (!state.discovered.devices.length) {
-      homebridge.toast.warning('Run "Discover" first', 'Add channel'); return;
+      toast('warning', 'Run "Discover" first', 'Add channel'); return;
     }
     pushNav({ kind: 'pickChannel' });
   });
@@ -452,7 +465,7 @@ function viewVariables(host) {
   $('hgui-filterBridge-variables').addEventListener('change', (e) => { state.ui.filterBridge.variables = e.target.value; state.ui.page.variables = 1; drawVariableRows(); });
   $('hgui-sort-variables').addEventListener('change', (e) => { state.ui.sort.variables = e.target.value; drawVariableRows(); });
   $('hgui-add-variable').addEventListener('click', () => {
-    if (!state.discovered.variables.length) { homebridge.toast.warning('Run "Discover" first', 'Add variable'); return; }
+    if (!state.discovered.variables.length) { toast('warning', 'Run "Discover" first', 'Add variable'); return; }
     pushNav({ kind: 'pickVariable' });
   });
   drawVariableRows();
@@ -572,7 +585,7 @@ function viewPrograms(host) {
   $('hgui-filterBridge-programs').addEventListener('change', (e) => { state.ui.filterBridge.programs = e.target.value; state.ui.page.programs = 1; drawProgramRows(); });
   $('hgui-sort-programs').addEventListener('change', (e) => { state.ui.sort.programs = e.target.value; drawProgramRows(); });
   $('hgui-add-program').addEventListener('click', () => {
-    if (!state.discovered.programs.length) { homebridge.toast.warning('Run "Discover" first', 'Add program'); return; }
+    if (!state.discovered.programs.length) { toast('warning', 'Run "Discover" first', 'Add program'); return; }
     pushNav({ kind: 'pickProgram' });
   });
   drawProgramRows();
@@ -714,7 +727,7 @@ function addChildBridge() {
     ccuAuth: { ...main.ccuAuth }, eventServer: { ...main.eventServer },
   });
   pushConfig();
-  homebridge.toast.success('Added child bridge', 'Bridges');
+  toast('success', 'Added child bridge', 'Bridges');
   rerender();
 }
 function regenerateBridgeIdentity(bi) {
@@ -722,7 +735,7 @@ function regenerateBridgeIdentity(bi) {
   state.blocks[bi]._bridge = { username: identityUsername(seed), port: identityPort(seed) };
   pushConfig();
   rerender();
-  homebridge.toast.warning('Identity regenerated — accessories on this bridge need to be re-paired in HomeKit', 'Bridges');
+  toast('warning', 'Identity regenerated — accessories on this bridge need to be re-paired in HomeKit', 'Bridges');
 }
 function identityUsername(seed) {
   const hash = Array.from(seed).reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0xC0FFEE);
@@ -914,7 +927,6 @@ function subPickChannel(host) {
 function drawPicker() {
   const host = $('hgui-picker-host');
   const pagerHost = $('hgui-picker-pager');
-  const cl = channelLookup();
   const configuredByAddr = new Map(allChannelsAcrossBridges().map((c) => [c.address, c]));
   const all = [];
   for (const d of state.discovered.devices) {
@@ -1071,7 +1083,7 @@ function subEditChannel(host, props) {
   footer.querySelector('#ec-cancel').addEventListener('click', popNav);
   footer.querySelector('#ec-save').addEventListener('click', () => {
     const name = (draft.name ?? '').trim();
-    if (!name) { homebridge.toast.warning('HomeKit name cannot be empty'); return; }
+    if (!name) { toast('warning', 'HomeKit name cannot be empty'); return; }
     for (const b of state.blocks) {
       const i = b.channels.findIndex((c) => c.address === address);
       if (i !== -1) b.channels.splice(i, 1);
@@ -1082,7 +1094,7 @@ function subEditChannel(host, props) {
       ...(draft.settings ? { settings: draft.settings } : {}),
     });
     pushConfig();
-    homebridge.toast.success(mode === 'add' ? 'Channel added' : 'Channel updated', 'Channels');
+    toast('success', mode === 'add' ? 'Channel added' : 'Channel updated', 'Channels');
     popNav();
   });
   if (mode === 'edit') {
@@ -1092,7 +1104,7 @@ function subEditChannel(host, props) {
         if (i !== -1) b.channels.splice(i, 1);
       }
       pushConfig();
-      homebridge.toast.success('Channel removed', 'Channels');
+      toast('success', 'Channel removed', 'Channels');
       popNav();
     });
   }
@@ -1196,7 +1208,7 @@ function subEditVariable(host, props) {
       ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
     });
     pushConfig();
-    homebridge.toast.success(mode === 'add' ? 'Variable added' : 'Variable updated', 'Variables');
+    toast('success', mode === 'add' ? 'Variable added' : 'Variable updated', 'Variables');
     popNav();
   });
   if (mode === 'edit') {
@@ -1206,7 +1218,7 @@ function subEditVariable(host, props) {
         if (i !== -1) b.variables.splice(i, 1);
       }
       pushConfig();
-      homebridge.toast.success('Variable removed', 'Variables');
+      toast('success', 'Variable removed', 'Variables');
       popNav();
     });
   }
@@ -1304,7 +1316,7 @@ function subEditProgram(host, props) {
       ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
     });
     pushConfig();
-    homebridge.toast.success(mode === 'add' ? 'Program added' : 'Program updated', 'Programs');
+    toast('success', mode === 'add' ? 'Program added' : 'Program updated', 'Programs');
     popNav();
   });
   if (mode === 'edit') {
@@ -1314,7 +1326,7 @@ function subEditProgram(host, props) {
         if (i !== -1) b.programs.splice(i, 1);
       }
       pushConfig();
-      homebridge.toast.success('Program removed', 'Programs');
+      toast('success', 'Program removed', 'Programs');
       popNav();
     });
   }
@@ -1346,10 +1358,10 @@ function subEditBridge(host, props) {
   $('eb-cancel').addEventListener('click', popNav);
   $('eb-save').addEventListener('click', () => {
     const v = nameDraft.trim();
-    if (!v) { homebridge.toast.warning('Name cannot be empty'); return; }
+    if (!v) { toast('warning', 'Name cannot be empty'); return; }
     b.name = v;
     pushConfig();
-    homebridge.toast.success('Renamed bridge', 'Bridges');
+    toast('success', 'Renamed bridge', 'Bridges');
     popNav();
   });
 }
@@ -1375,7 +1387,7 @@ function subRemoveBridge(host, props) {
     state.blocks.splice(bridgeIndex, 1);
     if (state.blocks.length === 0) state.blocks.push(DEFAULT_BLOCK());
     pushConfig();
-    homebridge.toast.success('Bridge removed', 'Bridges');
+    toast('success', 'Bridge removed', 'Bridges');
     popNav();
   });
 }
@@ -1384,31 +1396,31 @@ function subRemoveBridge(host, props) {
 
 async function onTestConnection() {
   $('hgui-test-result').textContent = 'Testing…';
-  homebridge.showSpinner();
+  spinner(true);
   try {
     const res = await homebridge.request('/test-connection', state.blocks[0]);
     $('hgui-test-result').innerHTML = res.ok
       ? `<span class="text-success">✓ ${h(res.message)}</span>`
       : `<span class="text-danger">✗ ${h(res.message)}</span>`;
-    (res.ok ? homebridge.toast.success : homebridge.toast.warning)(res.message, 'CCU');
+    toast(res.ok ? 'success' : 'warning', res.message, 'CCU');
   } catch (err) {
     $('hgui-test-result').innerHTML = `<span class="text-danger">✗ ${h(err.message)}</span>`;
-    homebridge.toast.error(err.message, 'CCU');
-  } finally { homebridge.hideSpinner(); }
+    toast('error', err.message, 'CCU');
+  } finally { spinner(false); }
 }
 
 async function onDiscover() {
-  homebridge.showSpinner();
+  spinner(true);
   try {
     const res = await homebridge.request('/discover', state.blocks[0]);
     state.discovered = res;
     rerender();
-    homebridge.toast.success(
+    toast('success', 
       `${res.devices.length} devices · ${res.variables.length} variables · ${res.programs.length} programs · ${res.rooms.length} rooms`,
       'Discovery complete');
   } catch (err) {
-    homebridge.toast.error(err.message, 'Discovery');
-  } finally { homebridge.hideSpinner(); }
+    toast('error', err.message, 'Discovery');
+  } finally { spinner(false); }
 }
 
 async function onImport() {
@@ -1418,7 +1430,7 @@ async function onImport() {
   const status = $('hgui-import-status');
   $('hgui-import-warnings').innerHTML = '';
   $('hgui-bridges-summary').innerHTML = '';
-  homebridge.showSpinner();
+  spinner(true);
   try {
     let report;
     if (file) {
@@ -1427,7 +1439,7 @@ async function onImport() {
     } else if (pasted.length) {
       report = await homebridge.request('/import-config-json', { configJson: pasted });
     } else {
-      homebridge.toast.warning('Provide a backup file or paste a config.json first', 'Import');
+      toast('warning', 'Provide a backup file or paste a config.json first', 'Import');
       return;
     }
     if (multi) {
@@ -1454,12 +1466,12 @@ async function onImport() {
     }
     status.textContent = `Imported ${report.channels.length} channels, ${report.variables.length} variables, ${report.programs.length} programs.`;
     pushConfig();
-    homebridge.toast.success('Import complete — review the changes and click Save at the bottom of the page', 'Import');
+    toast('success', 'Import complete — review the changes and click Save at the bottom of the page', 'Import');
     rerender();
   } catch (err) {
-    homebridge.toast.error(err.message, 'Import');
+    toast('error', err.message, 'Import');
     status.textContent = '✗ ' + err.message;
-  } finally { homebridge.hideSpinner(); }
+  } finally { spinner(false); }
 }
 
 function mergeReportIntoMain(report) {
@@ -1488,7 +1500,7 @@ function pushConfig() {
     const next = [...state.otherBlocks, ...state.blocks];
     homebridge.updatePluginConfig(next);
   } catch (err) {
-    homebridge.toast.error(`Could not stage config update: ${err.message}`);
+    toast('error', `Could not stage config update: ${err.message}`);
   }
 }
 
@@ -1530,7 +1542,7 @@ async function init() {
     }));
     state.otherBlocks = other;
   } catch (err) {
-    homebridge.toast.error(`Could not load config: ${err.message}`);
+    toast('error', `Could not load config: ${err.message}`);
   }
 
   try {
@@ -1541,7 +1553,7 @@ async function init() {
       $('hgui-version-banner').textContent = `v${r.pluginVersion}`;
     }
   } catch (err) {
-    homebridge.toast.error(`Could not load services: ${err.message}`);
+    toast('error', `Could not load services: ${err.message}`);
   }
 
   // Header listeners.
@@ -1554,7 +1566,19 @@ async function init() {
     if (e.key === 'Escape' && state.nav.length) popNav();
   });
 
-  navigate('dashboard');
+  // Initial tab: if the user hasn't configured a CCU yet, drop them
+  // straight into Settings. Otherwise show Dashboard and kick off a
+  // background Discover so the channels/variables/programs tabs are
+  // populated by the time the user clicks them.
+  const isConfigured = !!state.blocks[0]?.ccuIp && state.blocks[0].ccuIp.length > 0;
+  if (!isConfigured) {
+    navigate('settings');
+  } else {
+    navigate('dashboard');
+    // Fire-and-forget; failures fall back to the empty state with a
+    // hint already in place. No spinner — user can still navigate.
+    onDiscover().catch(() => { /* errors already toasted by onDiscover */ });
+  }
 }
 
 init();

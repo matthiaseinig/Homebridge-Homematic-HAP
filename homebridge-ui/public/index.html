@@ -23,7 +23,10 @@
   */
 
   /* App chrome ----------------------------------------------------- */
-  #hgui-app { display: flex; flex-direction: column; min-height: 100vh; color: var(--bs-body-color); }
+  /* Do NOT set min-height in viewport units. The host iframe auto-fits
+     its height to our content, so vh creates a positive feedback loop
+     (content grows → iframe grows → vh grows → … hits 100k+ px). */
+  #hgui-app { display: flex; flex-direction: column; color: var(--bs-body-color); }
   .hgui-header { display: flex; gap: 0.5rem; align-items: center; padding: 0.75rem 0; flex-wrap: wrap; }
   .hgui-header .hgui-brand { font-weight: 600; }
   .hgui-header .hgui-version { color: var(--bs-secondary-color); font-size: 0.8rem; }

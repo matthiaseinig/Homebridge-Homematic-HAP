@@ -45,6 +45,14 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/', 'references/'],
+    // server.js is the esbuild bundle of server.src.js; lint the source
+    // not the inlined output. dist/ is the tsc/esbuild output of src/.
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'coverage/',
+      'references/',
+      'homebridge-ui/server.js',
+    ],
   },
 );
