@@ -604,16 +604,66 @@ describe('WeatherStation initial pull', () => {
   });
 });
 
+/** Drain the microtask queue so initial-pull then-chains resolve. */
+const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
+
 describe('GarageDoor initial pull', () => {
-  it('seeds CurrentDoorState from DOOR_STATE at attach time', async () => {
+  it('seeds CurrentDoorState from DOOR_STATE at attach time (open)', async () => {
     const env = makeEnv();
     env.getValueMock.mockImplementation(async (_addr, dp) => dp === 'DOOR_STATE' ? 1 : undefined);
     const gchannel: CcuChannel = { address: 'HmIP.000GRG:1', name: 'Garage', index: 1, type: 'DOOR_OPENER' };
     const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
     garageDoorService.build(ctx).attach(gchannel);
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     const service = accessory.services[0]!;
     expect(getChar(service, 'CurrentDoorState').value).toBe(0); // OPEN
     expect(getChar(service, 'TargetDoorState').value).toBe(0);
+  });
+
+  it('seeds CurrentDoorState from DOOR_STATE at attach time (closed)', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_addr, dp) => dp === 'DOOR_STATE' ? 0 : undefined);
+    const gchannel: CcuChannel = { address: 'HmIP.000GRG:1', name: 'Garage', index: 1, type: 'DOOR_OPENER' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
+    garageDoorService.build(ctx).attach(gchannel);
+    await flush();
+    const service = accessory.services[0]!;
+    expect(getChar(service, 'CurrentDoorState').value).toBe(1); // CLOSED
+    expect(getChar(service, 'TargetDoorState').value).toBe(1);
+  });
+
+  it('initial pull ignores garbage DOOR_STATE', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_addr, dp) => dp === 'DOOR_STATE' ? 'nope' : undefined);
+    const gchannel: CcuChannel = { address: 'HmIP.000GRG:1', name: 'Garage', index: 1, type: 'DOOR_OPENER' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
+    garageDoorService.build(ctx).attach(gchannel);
+    await flush();
+    const service = accessory.services[0]!;
+    // Stays at the constructor default; updateCharacteristic was never called.
+    expect(getChar(service, 'CurrentDoorState').value).toBeUndefined();
+  });
+});
+
+describe('WeatherStation initial pull (microtask-flushed)', () => {
+  it('seeds Temperature / Humidity / Light / Rain', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_addr, dp) => {
+      if (dp === 'TEMPERATURE')  return 19.1;
+      if (dp === 'HUMIDITY')     return 55;
+      if (dp === 'ILLUMINATION') return 800;
+      if (dp === 'RAINING')      return false;
+      return undefined;
+    });
+    const wchannel: CcuChannel = { address: 'HmIP.000WTH:1', name: 'Garden', index: 1, type: 'WEATHER_TRANSMIT' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
+    weatherStationService.build(ctx).attach(wchannel);
+    await flush();
+    const tempSvc  = accessory.services.find((s) => s.subtype === 'weather-temp')!;
+    const humSvc   = accessory.services.find((s) => s.subtype === 'weather-hum')!;
+    const lightSvc = accessory.services.find((s) => s.subtype === 'weather-light')!;
+    expect(getChar(tempSvc,  'CurrentTemperature').value).toBe(19.1);
+    expect(getChar(humSvc,   'CurrentRelativeHumidity').value).toBe(55);
+    expect(getChar(lightSvc, 'CurrentAmbientLightLevel').value).toBe(800);
   });
 });

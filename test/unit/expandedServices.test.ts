@@ -148,6 +148,28 @@ describe('LockAccessory', () => {
     expect(current.value).toBe(0); // UNSECURED
   });
 
+  it('reflects STATE=false (locked) push event as SECURED', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: channel.address, service: 'LockAccessory' });
+    lockService.build(ctx).attach(channel);
+    env.fireEvent('HmIP.L:1', 'STATE', false);
+    const current = accessory.services[0]!.characteristics.get('char:LockCurrentState')!;
+    const target = accessory.services[0]!.characteristics.get('char:LockTargetState')!;
+    expect(current.value).toBe(1); // SECURED
+    expect(target.value).toBe(1);
+  });
+
+  it('initial pull seeds SECURED / UNSECURED based on STATE', async () => {
+    const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_a, dp) => dp === 'STATE' ? false : undefined);
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: channel.address, service: 'LockAccessory' });
+    lockService.build(ctx).attach(channel);
+    await flush();
+    const current = accessory.services[0]!.characteristics.get('char:LockCurrentState')!;
+    expect(current.value).toBe(1); // SECURED
+  });
+
   it('reflects ERROR>0 as JAMMED', () => {
     const env = makeEnv();
     const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: channel.address, service: 'LockAccessory' });
