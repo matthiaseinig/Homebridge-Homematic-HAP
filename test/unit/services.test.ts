@@ -528,15 +528,31 @@ describe('Battery mixin', () => {
     temperatureService.build(ctx).attach(bchannel);
     const battery = accessory.services.find((s) => s.subtype === 'battery');
     expect(battery).toBeDefined();
-    // LOW_BAT on the device-level (:0) address flips the
-    // StatusLowBattery characteristic.
     env.fireEvent('HmIP.000BAT:0', 'LOW_BAT', true);
     expect(getChar(battery!, 'StatusLowBattery').value).toBe(1);
     env.fireEvent('HmIP.000BAT:0', 'LOW_BAT', false);
     expect(getChar(battery!, 'StatusLowBattery').value).toBe(0);
   });
 
-  it('OPERATING_VOLTAGE maps to a 0..100 % BatteryLevel', () => {
+  it('also accepts the legacy LOWBAT spelling', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: bchannel.address, service: 'TemperatureAccessory' });
+    temperatureService.build(ctx).attach(bchannel);
+    const battery = accessory.services.find((s) => s.subtype === 'battery')!;
+    env.fireEvent('HmIP.000BAT:0', 'LOWBAT', true);
+    expect(getChar(battery, 'StatusLowBattery').value).toBe(1);
+  });
+
+  it('StatusLowBattery onGet returns LOW after a LOW_BAT=true event', async () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: bchannel.address, service: 'TemperatureAccessory' });
+    temperatureService.build(ctx).attach(bchannel);
+    const battery = accessory.services.find((s) => s.subtype === 'battery')!;
+    env.fireEvent('HmIP.000BAT:0', 'LOW_BAT', true);
+    expect(await getChar(battery, 'StatusLowBattery').onGetHandler!()).toBe(1);
+  });
+
+  it('OPERATING_VOLTAGE maps to a 0..100 % BatteryLevel and ignores junk', () => {
     const env = makeEnv();
     const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: bchannel.address, service: 'TemperatureAccessory' });
     temperatureService.build(ctx).attach(bchannel);
@@ -545,7 +561,59 @@ describe('Battery mixin', () => {
     expect(getChar(battery, 'BatteryLevel').value).toBe(100);
     env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 2.4);
     expect(getChar(battery, 'BatteryLevel').value).toBe(0);
-    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 2.8);
+    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', '2.8');
     expect(getChar(battery, 'BatteryLevel').value).toBe(50);
+    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 'NaN');
+    expect(getChar(battery, 'BatteryLevel').value).toBe(50); // unchanged
+  });
+
+  it('addresses without a colon suffix derive :0 from the bare address', () => {
+    const env = makeEnv();
+    const flat: CcuChannel = { address: 'HmIP.flat', name: 'F', index: 0, type: 'TEMPERATURE_SENSOR' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: flat.address, service: 'TemperatureAccessory' });
+    temperatureService.build(ctx).attach(flat);
+    const battery = accessory.services.find((s) => s.subtype === 'battery')!;
+    env.fireEvent('HmIP.flat:0', 'LOW_BAT', true);
+    expect(getChar(battery, 'StatusLowBattery').value).toBe(1);
+  });
+});
+
+describe('WeatherStation initial pull', () => {
+  it('seeds temperature / humidity / illumination from getValue at attach time', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_addr, dp) => {
+      if (dp === 'TEMPERATURE')  return 18.2;
+      if (dp === 'HUMIDITY')     return 71;
+      if (dp === 'ILLUMINATION') return 4500;
+      if (dp === 'RAINING')      return true;
+      return undefined;
+    });
+    const wchannel: CcuChannel = { address: 'HmIP.000WTH:1', name: 'Garden', index: 1, type: 'WEATHER_TRANSMIT' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
+    weatherStationService.build(ctx).attach(wchannel);
+    // Let the initial-pull promise chain settle.
+    await Promise.resolve(); await Promise.resolve();
+    const tempSvc  = accessory.services.find((s) => s.subtype === 'weather-temp')!;
+    const humSvc   = accessory.services.find((s) => s.subtype === 'weather-hum')!;
+    const lightSvc = accessory.services.find((s) => s.subtype === 'weather-light')!;
+    const rainSvc  = accessory.services.find((s) => s.subtype === 'weather-rain')!;
+    expect(getChar(tempSvc,  'CurrentTemperature').value).toBe(18.2);
+    expect(getChar(humSvc,   'CurrentRelativeHumidity').value).toBe(71);
+    expect(getChar(lightSvc, 'CurrentAmbientLightLevel').value).toBe(4500);
+    expect(getChar(rainSvc,  'LeakDetected').value).toBe(1);
+  });
+});
+
+describe('GarageDoor initial pull', () => {
+  it('seeds CurrentDoorState from DOOR_STATE at attach time', async () => {
+    const env = makeEnv();
+    env.getValueMock.mockImplementation(async (_addr, dp) => dp === 'DOOR_STATE' ? 1 : undefined);
+    const gchannel: CcuChannel = { address: 'HmIP.000GRG:1', name: 'Garage', index: 1, type: 'DOOR_OPENER' };
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
+    garageDoorService.build(ctx).attach(gchannel);
+    await Promise.resolve(); await Promise.resolve();
+    const service = accessory.services[0]!;
+    expect(getChar(service, 'CurrentDoorState').value).toBe(0); // OPEN
+    expect(getChar(service, 'TargetDoorState').value).toBe(0);
   });
 });
