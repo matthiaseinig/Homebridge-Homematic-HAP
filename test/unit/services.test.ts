@@ -24,6 +24,8 @@ import { humidityService } from '../../src/services/impl/HumidityAccessory.js';
 import { leakService } from '../../src/services/impl/LeakAccessory.js';
 import { variableSwitchService, variableLightService } from '../../src/services/impl/VariableAccessory.js';
 import { programService } from '../../src/services/impl/ProgramAccessory.js';
+import { weatherStationService } from '../../src/services/impl/WeatherStationAccessory.js';
+import { garageDoorService } from '../../src/services/impl/GarageDoorAccessory.js';
 
 const channel: CcuChannel = { address: 'HmIP.000123:1', name: 'Test', index: 1, type: 'SWITCH' };
 
@@ -397,5 +399,149 @@ describe('ProgramAccessory', () => {
     runProg.mockClear();
     await getChar(service, 'On').onSetHandler!(false);
     expect(runProg).not.toHaveBeenCalled();
+  });
+});
+
+describe('WeatherStationAccessory', () => {
+  const wchannel: CcuChannel = { address: 'HmIP.000WTH:1', name: 'Garden', index: 1, type: 'WEATHER_TRANSMIT' };
+
+  it('exposes Temperature / Humidity / LightSensor / LeakSensor sub-services', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
+    weatherStationService.build(ctx).attach(wchannel);
+    const subtypes = accessory.services.map((s) => s.subtype);
+    expect(subtypes).toContain('weather-temp');
+    expect(subtypes).toContain('weather-hum');
+    expect(subtypes).toContain('weather-light');
+    expect(subtypes).toContain('weather-rain');
+  });
+
+  it('TEMPERATURE / HUMIDITY / ILLUMINATION / RAINING events update the right sub-services', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
+    weatherStationService.build(ctx).attach(wchannel);
+    const tempSvc  = accessory.services.find((s) => s.subtype === 'weather-temp')!;
+    const humSvc   = accessory.services.find((s) => s.subtype === 'weather-hum')!;
+    const lightSvc = accessory.services.find((s) => s.subtype === 'weather-light')!;
+    const rainSvc  = accessory.services.find((s) => s.subtype === 'weather-rain')!;
+
+    env.fireEvent(wchannel.address, 'TEMPERATURE', 21.5);
+    expect(getChar(tempSvc, 'CurrentTemperature').value).toBe(21.5);
+
+    env.fireEvent(wchannel.address, 'HUMIDITY', 64);
+    expect(getChar(humSvc, 'CurrentRelativeHumidity').value).toBe(64);
+
+    env.fireEvent(wchannel.address, 'ILLUMINATION', 1234);
+    expect(getChar(lightSvc, 'CurrentAmbientLightLevel').value).toBe(1234);
+
+    env.fireEvent(wchannel.address, 'RAINING', true);
+    expect(getChar(rainSvc, 'LeakDetected').value).toBe(1);
+    env.fireEvent(wchannel.address, 'RAINING', false);
+    expect(getChar(rainSvc, 'LeakDetected').value).toBe(0);
+  });
+
+  it('clamps illumination to HAP range and ignores junk temperature', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: wchannel.address, service: 'WeatherStationAccessory' });
+    weatherStationService.build(ctx).attach(wchannel);
+    const lightSvc = accessory.services.find((s) => s.subtype === 'weather-light')!;
+    const tempSvc  = accessory.services.find((s) => s.subtype === 'weather-temp')!;
+
+    env.fireEvent(wchannel.address, 'ILLUMINATION', 1_000_000);
+    expect(getChar(lightSvc, 'CurrentAmbientLightLevel').value).toBe(100000);
+
+    env.fireEvent(wchannel.address, 'TEMPERATURE', 'NaN');
+    expect(getChar(tempSvc, 'CurrentTemperature').value).toBe(20); // unchanged default
+  });
+});
+
+describe('GarageDoorAccessory', () => {
+  const gchannel: CcuChannel = { address: 'HmIP.000GRG:1', name: 'Garage', index: 1, type: 'DOOR_OPENER' };
+
+  it('opens via DOOR_COMMAND=1 and dwells in OPENING until DOOR_STATE arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const env = makeEnv();
+      const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
+      garageDoorService.build(ctx).attach(gchannel);
+      const service = accessory.services[0]!;
+      await getChar(service, 'TargetDoorState').onSetHandler!(0); // OPEN
+      expect(env.setValueMock).toHaveBeenCalledWith(gchannel.address, 'DOOR_COMMAND', 1);
+      expect(getChar(service, 'CurrentDoorState').value).toBe(2); // OPENING
+
+      env.fireEvent(gchannel.address, 'DOOR_STATE', 1); // CCU reports OPEN
+      expect(getChar(service, 'CurrentDoorState').value).toBe(0); // HAP OPEN
+      expect(getChar(service, 'TargetDoorState').value).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes via DOOR_COMMAND=3 and a stuck door surfaces as STOPPED after travelSeconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const env = makeEnv();
+      const { ctx, accessory } = buildCtx(env, {
+        kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory',
+        settings: { travelSeconds: 5 },
+      });
+      garageDoorService.build(ctx).attach(gchannel);
+      const service = accessory.services[0]!;
+      await getChar(service, 'TargetDoorState').onSetHandler!(1); // CLOSE
+      expect(env.setValueMock).toHaveBeenCalledWith(gchannel.address, 'DOOR_COMMAND', 3);
+      expect(getChar(service, 'CurrentDoorState').value).toBe(3); // CLOSING
+
+      vi.advanceTimersByTime(5000);
+      expect(getChar(service, 'CurrentDoorState').value).toBe(4); // STOPPED
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('maps CCU DOOR_STATE values: 0=closed, 1=open, 2=ventilation, 3=ignored', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: gchannel.address, service: 'GarageDoorAccessory' });
+    garageDoorService.build(ctx).attach(gchannel);
+    const service = accessory.services[0]!;
+
+    env.fireEvent(gchannel.address, 'DOOR_STATE', 0);
+    expect(getChar(service, 'CurrentDoorState').value).toBe(1); // CLOSED
+    env.fireEvent(gchannel.address, 'DOOR_STATE', 2); // ventilation
+    expect(getChar(service, 'CurrentDoorState').value).toBe(0); // OPEN
+
+    // Unknown / 3 leaves the previous state.
+    env.fireEvent(gchannel.address, 'DOOR_STATE', 3);
+    expect(getChar(service, 'CurrentDoorState').value).toBe(0);
+  });
+});
+
+describe('Battery mixin', () => {
+  const bchannel: CcuChannel = { address: 'HmIP.000BAT:2', name: 'Sensor', index: 2, type: 'TEMPERATURE_SENSOR' };
+
+  it('temperature accessory exposes a Battery service driven by LOW_BAT on the device :0 channel', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: bchannel.address, service: 'TemperatureAccessory' });
+    temperatureService.build(ctx).attach(bchannel);
+    const battery = accessory.services.find((s) => s.subtype === 'battery');
+    expect(battery).toBeDefined();
+    // LOW_BAT on the device-level (:0) address flips the
+    // StatusLowBattery characteristic.
+    env.fireEvent('HmIP.000BAT:0', 'LOW_BAT', true);
+    expect(getChar(battery!, 'StatusLowBattery').value).toBe(1);
+    env.fireEvent('HmIP.000BAT:0', 'LOW_BAT', false);
+    expect(getChar(battery!, 'StatusLowBattery').value).toBe(0);
+  });
+
+  it('OPERATING_VOLTAGE maps to a 0..100 % BatteryLevel', () => {
+    const env = makeEnv();
+    const { ctx, accessory } = buildCtx(env, { kind: 'channel', id: bchannel.address, service: 'TemperatureAccessory' });
+    temperatureService.build(ctx).attach(bchannel);
+    const battery = accessory.services.find((s) => s.subtype === 'battery')!;
+    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 3.2);
+    expect(getChar(battery, 'BatteryLevel').value).toBe(100);
+    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 2.4);
+    expect(getChar(battery, 'BatteryLevel').value).toBe(0);
+    env.fireEvent('HmIP.000BAT:0', 'OPERATING_VOLTAGE', 2.8);
+    expect(getChar(battery, 'BatteryLevel').value).toBe(50);
   });
 });
