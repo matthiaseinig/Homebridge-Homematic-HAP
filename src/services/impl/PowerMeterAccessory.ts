@@ -90,7 +90,9 @@ class PowerMeterHandler extends AccessoryBase implements ChannelService {
   ): InstanceType<typeof this.Characteristic> {
     const existing = findCharacteristicByUuid(service, uuid);
     if (existing) {
-      return existing;
+      // findCharacteristicByUuid walks an opaque container and returns
+      // unknown; the caller knows it stored a Characteristic instance.
+      return existing as InstanceType<typeof this.Characteristic>;
     }
     const props: CharacteristicProps = {
       format: 'float' as CharacteristicProps['format'],
