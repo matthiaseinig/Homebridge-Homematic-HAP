@@ -343,15 +343,22 @@ describe('SlatBlindAccessory', () => {
     const positionState = accessory.services[0]!.characteristics.get('char:PositionState')!;
     const target = accessory.services[0]!.characteristics.get('char:TargetPosition')!;
 
-    // Increasing: current=0, target=80 → STATE_INCREASING (1)
-    env.fireEvent('HmIP.S:4', 'LEVEL', 0);
+    // Increasing: current=20, set target=80 (no LEVEL pushed in between),
+    // then WORKING=true fires derivePositionState → STATE_INCREASING (1).
+    env.fireEvent('HmIP.S:4', 'LEVEL', 0.2);
     await target.onSetHandler!(80);
+    env.fireEvent('HmIP.S:4', 'WORKING', true);
     expect(positionState.value).toBe(1);
 
-    // Decreasing: current=80, target=20 → STATE_DECREASING (0)
+    // Decreasing: current=80, target=20.
     env.fireEvent('HmIP.S:4', 'LEVEL', 0.8);
     await target.onSetHandler!(20);
+    env.fireEvent('HmIP.S:4', 'WORKING', true);
     expect(positionState.value).toBe(0);
+
+    // WORKING=false → STATE_STOPPED (2).
+    env.fireEvent('HmIP.S:4', 'WORKING', false);
+    expect(positionState.value).toBe(2);
   });
 });
 
