@@ -1,53 +1,83 @@
-function toFiniteNumber(value) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : void 0;
-  }
-  if (typeof value === "string") {
-    if (value.length === 0) {
-      return void 0;
+/**
+ * Defensive value coercion helpers used at every CCU → HomeKit boundary.
+ *
+ * The CCU returns datapoint values as either typed XML-RPC primitives or,
+ * in some firmware revisions, as strings — and occasionally as `NaN`,
+ * `Infinity`, or out-of-range numbers. HomeKit reacts badly to invalid
+ * `updateCharacteristic` values: an accessory will simply stop responding
+ * in the Home app until Homebridge restarts.
+ *
+ * `normalizeLevelToPercent` in particular guards against a CCU quirk
+ * documented by AlexanderSchmutz/homebridge-homematic-asaw (ISC): some
+ * Raspberrymatic builds emit `LEVEL` as 0..1 (the documented range),
+ * others as 0..100. The naïve `value * 100` produces 10000 % blind
+ * positions on the latter, which Homebridge then rejects and HomeKit
+ * shows as "Not Responding". We auto-detect the range instead.
+ */
+/** Coerce arbitrary input to a finite number, or undefined. */
+export function toFiniteNumber(value) {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : undefined;
     }
-    const n = parseFloat(value);
-    return Number.isFinite(n) ? n : void 0;
-  }
-  if (typeof value === "boolean") {
-    return value ? 1 : 0;
-  }
-  return void 0;
+    if (typeof value === 'string') {
+        if (value.length === 0) {
+            return undefined;
+        }
+        const n = parseFloat(value);
+        return Number.isFinite(n) ? n : undefined;
+    }
+    if (typeof value === 'boolean') {
+        return value ? 1 : 0;
+    }
+    return undefined;
 }
-function clamp(value, min, max) {
-  if (value < min) {
-    return min;
-  }
-  if (value > max) {
-    return max;
-  }
-  return value;
+export function clamp(value, min, max) {
+    if (value < min) {
+        return min;
+    }
+    if (value > max) {
+        return max;
+    }
+    return value;
 }
-function toRanged(value, min, max, fallback) {
-  const n = toFiniteNumber(value);
-  if (n === void 0) {
-    return fallback;
-  }
-  return clamp(n, min, max);
+/**
+ * Coerce to a finite, clamped number with a fallback if the input is
+ * unusable. Use on every event path that drives `updateCharacteristic`.
+ */
+export function toRanged(value, min, max, fallback) {
+    const n = toFiniteNumber(value);
+    if (n === undefined) {
+        return fallback;
+    }
+    return clamp(n, min, max);
 }
-function normalizeLevelToPercent(value) {
-  const n = toFiniteNumber(value);
-  if (n === void 0) {
-    return void 0;
-  }
-  if (n >= -1 && n <= 1) {
-    return clamp(Math.round(n * 100), 0, 100);
-  }
-  return clamp(Math.round(n), 0, 100);
+/**
+ * Normalize a CCU LEVEL datapoint to a HomeKit percentage in [0, 100].
+ *
+ *   |value| ≤ 1   ⇒ assume native 0..1, multiply by 100
+ *   |value| ≤ 100 ⇒ already a percentage
+ *   otherwise     ⇒ clamp into range
+ *
+ * Returns undefined when the input cannot be made into a finite number.
+ *
+ * Adapted from AlexanderSchmutz/homebridge-homematic-asaw (ISC).
+ */
+export function normalizeLevelToPercent(value) {
+    const n = toFiniteNumber(value);
+    if (n === undefined) {
+        return undefined;
+    }
+    if (n >= -1 && n <= 1) {
+        return clamp(Math.round(n * 100), 0, 100);
+    }
+    return clamp(Math.round(n), 0, 100);
 }
-function percentToLevelFraction(percent) {
-  return clamp(percent, 0, 100) / 100;
+/**
+ * Inverse of normalizeLevelToPercent: convert a HomeKit percentage
+ * (0..100) into the CCU's native 0..1 LEVEL representation that the
+ * BLIND/DIMMER receiver channels accept on `setValue`.
+ */
+export function percentToLevelFraction(percent) {
+    return clamp(percent, 0, 100) / 100;
 }
-export {
-  clamp,
-  normalizeLevelToPercent,
-  percentToLevelFraction,
-  toFiniteNumber,
-  toRanged
-};
 //# sourceMappingURL=sanitize.js.map

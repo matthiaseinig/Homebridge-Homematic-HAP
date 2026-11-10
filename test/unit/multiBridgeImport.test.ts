@@ -94,12 +94,12 @@ describe('splitReportIntoBridges', () => {
 });
 
 describe('importConfigJson — newly aliased services', () => {
-  it('maps PushTheButton to ProgrammableSwitchAccessory', () => {
+  it('maps PushTheButton (a key-press output) to KeyPressSwitchAccessory', () => {
     const r = importConfigJson({
       channels: ['HmIP.K:1'],
       mappings: { 'HmIP.K:1': { Service: 'HomeMaticPushTheButtonAccessory' } },
     });
-    expect(r.channels[0]?.service).toBe('ProgrammableSwitchAccessory');
+    expect(r.channels[0]?.service).toBe('KeyPressSwitchAccessory');
   });
 
   it('maps DoorOpener to DoorOpenerAccessory', () => {

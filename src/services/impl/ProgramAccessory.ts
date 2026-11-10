@@ -7,7 +7,7 @@ import type {
 
 class ProgramHandler extends AccessoryBase implements ProgramService {
   attach(programName: string): void {
-    const service = this.getOrAddService(this.Service.Switch, programName);
+    const service = this.getOrAddService(this.Service.Switch, this.accessory.displayName || programName);
 
     service.getCharacteristic(this.Characteristic.On)
       .onGet(this.wrapGet<boolean>(() => false))

@@ -1,7 +1,1 @@
-{
-  "version": 3,
-  "sources": ["../../src/index.ts"],
-  "sourcesContent": ["import type { API } from 'homebridge';\nimport { HomematicPlatform } from './platform.js';\nimport { PLATFORM_NAME } from './settings.js';\n\nexport default (api: API): void => {\n  api.registerPlatform(PLATFORM_NAME, HomematicPlatform);\n};\n"],
-  "mappings": "AACA,SAAS,yBAAyB;AAClC,SAAS,qBAAqB;AAE9B,IAAO,cAAQ,CAAC,QAAmB;AACjC,MAAI,iBAAiB,eAAe,iBAAiB;AACvD;",
-  "names": []
-}
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,iBAAiB,EAAE,MAAM,eAAe,CAAC;AAClD,OAAO,EAAE,aAAa,EAAE,MAAM,eAAe,CAAC;AAE9C,eAAe,CAAC,GAAQ,EAAQ,EAAE;IAChC,GAAG,CAAC,gBAAgB,CAAC,aAAa,EAAE,iBAAiB,CAAC,CAAC;AACzD,CAAC,CAAC"}

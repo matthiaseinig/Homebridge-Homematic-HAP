@@ -34,7 +34,7 @@ class VariableNumericSensorHandler extends AccessoryBase implements VariableServ
       this.value = initial;
     }
 
-    const service = this.getOrAddService(this.serviceTypeFor(this.variant), this.name);
+    const service = this.getOrAddService(this.serviceTypeFor(this.variant), this.accessory.displayName || this.name);
     const charType = this.characteristicFor(this.variant);
 
     service.getCharacteristic(charType)

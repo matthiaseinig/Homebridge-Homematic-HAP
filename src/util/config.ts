@@ -118,5 +118,6 @@ export function resolveConfig(raw: RawConfig): ResolvedConfig {
     channels,
     variables,
     programs,
+    hapHomematicIdentity: raw.hapHomematicIdentity === true,
   };
 }

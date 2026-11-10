@@ -47,6 +47,12 @@ export interface ResolvedConfig {
   channels: ChannelMapping[];
   variables: VariableMapping[];
   programs: ProgramMapping[];
+  /**
+   * Reuse hap-homematic HomeKit identities: accessory UUIDs come from each
+   * mapping's `uuidSeed` and HAP services use hap-homematic's subtypes.
+   * Off by default. See docs/IMPORT-FROM-HAP-HOMEMATIC.md.
+   */
+  hapHomematicIdentity: boolean;
 }
 
 /** Shape of an entry in `config.channels[]`, keyed in the UI by address. */
@@ -61,6 +67,12 @@ export interface ChannelMapping {
   settings?: Record<string, unknown>;
   /** hap-homematic instance UUID this channel belonged to, when imported. */
   instance?: string;
+  /**
+   * Seed of the HomeKit accessory UUID as hap-homematic computed it
+   * (`<CCU channel type>:<HomeKit name>`). Only used when the platform
+   * block sets `hapHomematicIdentity: true`.
+   */
+  uuidSeed?: string;
 }
 
 export interface VariableMapping {
@@ -72,6 +84,8 @@ export interface VariableMapping {
   subtype?: string;
   settings?: Record<string, unknown>;
   instance?: string;
+  /** See ChannelMapping.uuidSeed; hap-homematic used `undefined:<HomeKit name>`. */
+  uuidSeed?: string;
 }
 
 export interface ProgramMapping {
@@ -96,6 +110,12 @@ export interface AccessoryContext {
   settings?: Record<string, unknown>;
   /** Last-known display name (used to detect renames). */
   name?: string;
+  /**
+   * True when this accessory reuses a hap-homematic HomeKit identity. HAP
+   * services then use hap-homematic's subtypes so a transplanted
+   * IdentifierCache yields the same instance ids (automations survive).
+   */
+  legacyLayout?: boolean;
 }
 
 /** What the platform expects in `homebridge.config.json` for this plugin. */
@@ -106,6 +126,7 @@ export interface RawConfig extends PlatformConfig {
   useTls?: boolean;
   ccuAuth?: Partial<CcuAuthConfig>;
   eventServer?: Partial<EventServerConfig>;
+  hapHomematicIdentity?: boolean;
   channels?: ChannelMapping[];
   variables?: VariableMapping[];
   programs?: ProgramMapping[];

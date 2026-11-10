@@ -2,11 +2,20 @@
 
 This plugin can read your existing
 [hap-homematic](https://github.com/thkl/hap-homematic) configuration
-and turn it into Homebridge config blocks. No accessory has to be
-re-paired in the Home app: HomeKit identifies accessories by their
-*HomeKit setup info*, not by which bridge they live behind, so
-**after migration the Home app sees the same accessories at the same
-names**.
+and turn it into Homebridge config blocks.
+
+**HomeKit identity.** HomeKit knows a bridged accessory by its bridge
+(the HAP username / device id and pairing keys) plus the accessory's
+instance ids. A *new* bridge is therefore a new set of accessories: you
+pair it in the Home app, put the accessories into rooms again and
+rebuild automations and scenes that used the old ones. The default
+import (Steps 1 to 5) works that way.
+
+If you want the Home app to keep the existing accessories, names, rooms,
+automations and scenes, use the identity-preserving migration described
+in [Keeping HomeKit identities](#keeping-homekit-identities) instead: each
+hap-homematic bridge moves to a Homebridge child bridge with the *same*
+HomeKit identity, so nothing has to be paired again.
 
 ## Step 1 — Take a backup from hap-homematic
 
@@ -76,10 +85,10 @@ Homebridge log:
 [HomematicHap:ccu:rpc:HmIP-RF] Subscribed (homebridge-homematic-hap:HmIP-RF -> http://...:9875)
 ```
 
-Open the Home app. Your accessories should appear within a few
-seconds. If you'd like to keep the old bridge around as a safety net,
-just unpair it from HomeKit when you're confident — pairing is
-independent of the underlying CCU.
+Pair the new bridge (or each child bridge) in the Home app, assign rooms,
+and rebuild automations that used the old accessories. While both the
+old hap-homematic bridge and the new one are paired, every device shows
+up twice; remove the old bridge from the Home app once the new one works.
 
 ## Step 6 — (Optional) Decommission hap-homematic
 
@@ -104,18 +113,73 @@ hap-homematic backup you took in Step 1 is still authoritative.
 | HomeMaticHumidityAccessory | `HumidityAccessory` |
 | HomeMaticSmokeDetectorAccessory | `SmokeAccessory` |
 | HomeMaticLeakSensorAccessory | `LeakAccessory` |
-| HomeMaticVariableAccessory (boolean) | `VariableSwitchAccessory` |
-| HomeMaticVariableAccessory (numeric) | `VariableLightAccessory` |
+| HomeMaticVariableAccessory | `VariableSwitchAccessory` |
 | HomeMaticProgramAccessory | `ProgramAccessory` |
+| HomeMaticPushTheButtonAccessory | `KeyPressSwitchAccessory` (a switch that *sends* a key press) |
+| HomeMaticDoorOpenerAccessory | `DoorOpenerAccessory` (honours `OnTime`) |
+| HomeMaticVariableNumberSensorAccessory (`Humidity` / `LuxOmeter`) | `VariableNumericSensorAccessory` (`humidity` / `light`) |
+| HomeMaticVarBasedThermometerAccessory | `VariableNumericSensorAccessory` (`temperature`) |
 
 Anything not in this table will land in your *Imported with warnings*
 banner. Open an issue with the offending class name and we'll prioritise
 it.
 
+## What the importer reads
+
+hap-homematic 0.0.63 backups store, per channel, `mappings[address] =
+{ name, Service, instance: [<bridge id>], settings: { Type, ... } }` and,
+per variable, `mappings["<variable>:0"]`. The importer reads both
+shapes, takes `Type` from `settings`, and skips mappings whose bridge no
+longer exists (hap-homematic does not publish those either; they are
+listed in the import warnings). `devices.json` from the backup supplies
+the CCU channel types used for the identity seeds below.
+
+## Keeping HomeKit identities
+
+hap-homematic runs one HAP bridge per instance (often one per room). Each
+bridge's pairing lives in `persist/AccessoryInfo.<username>.json` and
+its instance ids in `persist/IdentifierCache.<username>.json`, both
+inside the backup. hap-homematic derived each accessory's UUID from
+`<CCU channel type>:<HomeKit name>` and created most HAP services with
+the service UUID as subtype.
+
+With `hapHomematicIdentity: true` on a platform block, this plugin
+reproduces that: accessory UUIDs come from each mapping's `uuidSeed`
+and services use hap-homematic's subtypes. Run the block as a child
+bridge with the old bridge's `username`, `pin` and `setupID`, and put the
+two persist files into Homebridge's `persist/` directory before it
+starts. HomeKit then sees the same bridge with the same accessories.
+
+`scripts/hap-homematic-to-config.mjs` produces such blocks and extracts
+the persist files:
+
+```bash
+npm run build
+node scripts/hap-homematic-to-config.mjs backup.tar.gz --preserve-identity \
+  --bridge "Keller" --base current-block.json --out blocks.json \
+  --persist-out persist-files/
+```
+
+Rules that keep this safe:
+
+- **Never run both.** The old bridge must be gone from the network
+  before the child bridge starts: remove that instance in hap-homematic
+  (or stop the add-on). A deactivated instance is *still published* (with
+  no accessories) and would make HomeKit drop them.
+- **Rollback** is the reverse: stop the child bridge, then bring the
+  instance back in hap-homematic (restore the backup taken before).
+- Accessory UUIDs no longer change when you rename an accessory here
+  (hap-homematic re-created an accessory on rename). Moving a channel to
+  another bridge does create a new accessory.
+- Characteristics this plugin does not implement disappear from the
+  accessory (for example HoldPosition and slat tilt on blinds, Eve
+  history on window contacts, OutletInUse). Automations that use them
+  need adjusting.
+
 ## What the importer does NOT do
 
-- It does **not** copy HAP pairing data. Bridge pairing always belongs
-  to whichever Homebridge instance owns it.
+- It does **not** copy HAP pairing data by itself. The CLI's
+  `--persist-out` extracts it for the identity-preserving migration.
 - It does **not** copy fakegato history (`*.pstore`). The Eve app's
   graphs will start fresh.
 - It does **not** delete or modify the source backup file.
