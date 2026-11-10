@@ -23,6 +23,7 @@ export declare class HomematicPlatform implements DynamicPlatformPlugin {
     /** Per-launch memo so N mapped channels cost one CCU device listing, not N. */
     private devicesMemo;
     private variablesMemo;
+    private readonly multiBridgeHost;
     constructor(log: Logging, config: PlatformConfig, api: API);
     configureAccessory(accessory: PlatformAccessory): void;
     /** Public for the homebridge-ui server to query CCU on demand. */

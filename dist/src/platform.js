@@ -10,9 +10,12 @@
  */
 import { CcuClient } from './ccu/CcuClient.js';
 import { findProgramServiceByKey, findServiceByKey, findVariableServiceByKey, pickVariableService, PROGRAM_SERVICE_DEFINITIONS, } from './services/registry.js';
-import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
+import { PLATFORM_NAME, PLUGIN_NAME, PLUGIN_VERSION } from './settings.js';
+import { MultiBridgeHost } from './multiBridge/MultiBridgeHost.js';
+import { persistIdentityStore } from './multiBridge/identityStore.js';
 import { ConfigError, resolveConfig } from './util/config.js';
 import { PrefixedLogger } from './util/logger.js';
+import { channelDisplayName, findChannel, programDisplayName, variableDisplayName } from './util/mappings.js';
 import { PluginStorage } from './util/storage.js';
 export class HomematicPlatform {
     Service;
@@ -27,6 +30,7 @@ export class HomematicPlatform {
     /** Per-launch memo so N mapped channels cost one CCU device listing, not N. */
     devicesMemo;
     variablesMemo;
+    multiBridgeHost;
     constructor(log, config, api) {
         this.api = api;
         this.Service = api.hap.Service;
@@ -45,6 +49,16 @@ export class HomematicPlatform {
             throw err;
         }
         this.ccu = new CcuClient({ config: this.resolved, log: this.log.child('ccu') });
+        if (this.resolved.multiBridge) {
+            this.multiBridgeHost = new MultiBridgeHost({
+                hap: api.hap,
+                ccu: this.ccu,
+                config: this.resolved.multiBridge,
+                log: this.log.child('multi'),
+                version: PLUGIN_VERSION,
+                identityStore: persistIdentityStore(api.user.persistPath()),
+            });
+        }
         this.api.on('didFinishLaunching', () => {
             this.didFinishLaunching().catch((err) => {
                 this.log.error('Startup failed: %s', err.message);
@@ -69,6 +83,15 @@ export class HomematicPlatform {
         if (!this.resolved || !this.ccu) {
             return;
         }
+        if (this.multiBridgeHost) {
+            // The host publishes its own HAP bridges; this block's own (child)
+            // bridge carries no accessories. Cached ones are left untouched.
+            if (this.cachedAccessories.size > 0) {
+                this.log.warn('Multi-bridge mode ignores %d cached accessories of this block', this.cachedAccessories.size);
+            }
+            await this.multiBridgeHost.start();
+            return;
+        }
         await this.storage.ensureRoot();
         await this.ccu.start();
         this.log.success('Connected to CCU at %s', this.resolved.ccuIp);
@@ -88,10 +111,7 @@ export class HomematicPlatform {
             try {
                 const uuid = this.accessoryUuid(`variable:${mapping.name}`, mapping.uuidSeed);
                 seen.add(uuid);
-                const legacyName = typeof mapping.settings?.name === 'string'
-                    ? mapping.settings.name : undefined;
-                const dn = mapping.displayName ?? legacyName;
-                await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, dn, mapping.subtype);
+                await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, variableDisplayName(mapping), mapping.subtype);
             }
             catch (err) {
                 this.log.warn('Skipping variable %s: %s', mapping.name, err.message);
@@ -101,9 +121,7 @@ export class HomematicPlatform {
             try {
                 const uuid = this.api.hap.uuid.generate(`program:${mapping.name}`);
                 seen.add(uuid);
-                const legacyName = typeof mapping.settings?.name === 'string'
-                    ? mapping.settings.name : undefined;
-                await this.attachProgram(uuid, mapping.name, mapping.displayName ?? legacyName);
+                await this.attachProgram(uuid, mapping.name, programDisplayName(mapping));
             }
             catch (err) {
                 this.log.warn('Skipping program %s: %s', mapping.name, err.message);
@@ -125,6 +143,10 @@ export class HomematicPlatform {
         }
     }
     async shutdown() {
+        if (this.multiBridgeHost) {
+            await this.multiBridgeHost.stop();
+            return;
+        }
         for (const m of this.managed.values()) {
             try {
                 m.handler.dispose?.();
@@ -151,18 +173,8 @@ export class HomematicPlatform {
         }
         const channel = await this.fetchChannel(address, mapping.name);
         // mapping.name is the user-customised HomeKit display name (set in the
-        // GUI or imported from hap-homematic). Falls back to the CCU's channel
-        // name when the user hasn't overridden it.
-        //
-        // Pre-0.1.5 imports stored the custom name nested under settings.name
-        // because the importer's drop-list excluded it. Pick it up from there
-        // so users don't have to re-import.
-        const settingsName = typeof mapping.settings?.name === 'string'
-            ? mapping.settings.name
-            : undefined;
-        const displayName = (mapping.name && mapping.name.length > 0 && mapping.name)
-            || (settingsName && settingsName.length > 0 ? settingsName : undefined)
-            || channel.name;
+        // GUI or imported from hap-homematic); see channelDisplayName.
+        const displayName = channelDisplayName(mapping, channel);
         const accessory = this.getOrCreateAccessory(uuid, displayName, {
             kind: 'channel',
             id: address,
@@ -253,21 +265,7 @@ export class HomematicPlatform {
             throw new Error('CCU client not initialized');
         }
         this.devicesMemo ??= this.ccu.listDevices();
-        const devices = await this.devicesMemo;
-        for (const device of devices) {
-            const channel = device.channels.find((c) => c.address === address);
-            if (channel) {
-                return channel;
-            }
-        }
-        // Channel not currently visible — fall back to a stub so the accessory
-        // still registers; events for it will still flow when the CCU sees it.
-        return {
-            address,
-            index: 0,
-            name: fallbackName ?? address,
-            type: 'UNKNOWN',
-        };
+        return findChannel(await this.devicesMemo, address, fallbackName);
     }
     /**
      * Accessory UUID. With `hapHomematicIdentity` and a `uuidSeed` from the

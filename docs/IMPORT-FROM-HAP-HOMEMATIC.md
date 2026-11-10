@@ -172,9 +172,71 @@ Rules that keep this safe:
   (hap-homematic re-created an accessory on rename). Moving a channel to
   another bridge does create a new accessory.
 - Characteristics this plugin does not implement disappear from the
-  accessory (for example HoldPosition and slat tilt on blinds, Eve
+  accessory (for example ObstructionDetected and slat tilt on blinds, Eve
   history on window contacts, OutletInUse). Automations that use them
   need adjusting.
+
+### Multi-bridge mode (one process for all bridges)
+
+One child bridge per hap-homematic bridge means one Homebridge process and
+one CCU subscription per bridge. Multi-bridge mode (1.4.0) runs them all in
+**one** platform block: one process, one CCU connection, one event
+subscription, and one HAP bridge per former hap-homematic bridge, each
+published by the plugin with its original username, pin, setupID, bridge
+UUID (hap-homematic's instance id) and accessory UUIDs. This is the
+default output of the CLI:
+
+```bash
+npm run build
+node scripts/hap-homematic-to-config.mjs backup.tar.gz --base current-block.json \
+  --out block.json --persist-out persist-files/ --persist-bridge "Carport"
+node scripts/multi-bridge-enable.mjs block.json --bridge "HomeMatic Carport"
+```
+
+```json
+{
+  "platform": "HomematicHap",
+  "name": "HomeMatic Bridges",
+  "ccuIp": "...",
+  "eventServer": { "port": 9875 },
+  "_bridge": { "username": "...", "port": 9255 },
+  "multiBridge": {
+    "advertiser": "ciao",
+    "bridges": [
+      { "name": "HomeMatic Carport", "enabled": false, "username": "...", "pincode": "...",
+        "setupID": "...", "port": 12345, "bridgeUuid": "<hap-homematic instance id>",
+        "channels": [ ... ], "variables": [ ... ], "programs": [ ... ] }
+    ]
+  }
+}
+```
+
+- Every bridge is listed with `enabled: false`. A disabled bridge is not
+  built or published at all, so an identity that still runs on the CCU is
+  never advertised twice. Enable bridges batch by batch.
+- Nothing is published until the CCU is reachable (event subscription
+  up, devices listed). An unreachable bridge keeps its accessories in
+  HomeKit; one that came back with fewer accessories would lose them.
+- A bridge is published only when its `AccessoryInfo` and
+  `IdentifierCache` files are in Homebridge's `persist/` directory and its
+  pin and setupID match them. Otherwise it is skipped with an error, never
+  re-created under the old username. `newIdentity: true` lifts this for a
+  throwaway smoke-test bridge (`--smoke-bridge <channel>`).
+- A bridge whose HAP port is in use, or that would have no accessory, is
+  skipped; the others start.
+- Instance ids of characteristics that appear only after the first CCU
+  read (thermostat humidity) are kept, so they get their old IID back.
+- Shutdown unpublishes the bridges; it never deletes their persist files.
+- The block's own `_bridge` is a Homebridge child bridge with no
+  accessories. Homebridge advertises it like any child bridge; do not pair
+  it.
+- Do not edit this block in the plugin's config UI: adding a channel at
+  block level stops the whole block (mappings belong to a bridge).
+
+`scripts/iid-check.mjs` checks a block offline before any cutover: it
+builds every bridge with the plugin code against a copy of its
+IdentifierCache (no publishing, no network) and reports kept, added and
+lost accessory and instance ids; it exits 1 on any mismatch.
 
 ## What the importer does NOT do
 

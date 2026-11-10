@@ -7,12 +7,27 @@
  *   2. Otherwise the highest-priority service whose `channelTypes`
  *      includes the device's channel type.
  */
-import type { Characteristic, PlatformAccessory, Service } from 'homebridge';
+import type { Characteristic, Service, WithUUID } from 'homebridge';
 import type { CcuClient } from '../ccu/CcuClient.js';
 import type { PrefixedLogger } from '../util/logger.js';
 import type { AccessoryContext, CcuChannel, CcuVariable } from '../types.js';
+/**
+ * The part of an accessory that service handlers use. A Homebridge
+ * `PlatformAccessory` satisfies it, and so does the thin adapter over a
+ * plain HAP-NodeJS `Accessory` used by the multi-bridge host, which
+ * publishes its own HAP bridges instead of registering platform
+ * accessories.
+ */
+export interface AccessoryHandle {
+    readonly UUID: string;
+    displayName: string;
+    context: AccessoryContext;
+    getService(name: string | WithUUID<typeof Service>): Service | undefined;
+    getServiceById(uuid: string | WithUUID<typeof Service>, subType: string): Service | undefined;
+    addService(service: Service): Service;
+}
 export interface ServiceContext {
-    accessory: PlatformAccessory<AccessoryContext>;
+    accessory: AccessoryHandle;
     ccu: CcuClient;
     log: PrefixedLogger;
     Service: typeof Service;

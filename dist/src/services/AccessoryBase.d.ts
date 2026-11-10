@@ -7,14 +7,13 @@
  *
  * Services subclass this and implement attach().
  */
-import type { Characteristic, CharacteristicValue, PlatformAccessory, Service, WithUUID } from 'homebridge';
+import type { Characteristic, CharacteristicValue, Service, WithUUID } from 'homebridge';
 import type { CcuClient } from '../ccu/CcuClient.js';
 import type { PrefixedLogger } from '../util/logger.js';
-import type { AccessoryContext } from '../types.js';
-import type { ServiceContext } from './types.js';
+import type { AccessoryHandle, ServiceContext } from './types.js';
 export type DatapointListener = (value: unknown) => void;
 export declare abstract class AccessoryBase {
-    protected readonly accessory: PlatformAccessory<AccessoryContext>;
+    protected readonly accessory: AccessoryHandle;
     protected readonly ccu: CcuClient;
     protected readonly log: PrefixedLogger;
     protected readonly Service: typeof Service;
