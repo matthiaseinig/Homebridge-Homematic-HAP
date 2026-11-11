@@ -14,7 +14,7 @@ class VariableSwitchHandler extends AccessoryBase implements VariableService {
   attach(variable: CcuVariable): void {
     this.name = variable.name;
     this.value = Boolean(variable.value);
-    const service = this.getOrAddService(this.Service.Switch, this.name);
+    const service = this.getOrAddService(this.Service.Switch, this.accessory.displayName || this.name);
 
     service.getCharacteristic(this.Characteristic.On)
       .onGet(this.wrapGet<boolean>(() => this.value))
@@ -66,7 +66,7 @@ class VariableLightHandler extends AccessoryBase implements VariableService {
     const initial = typeof variable.value === 'number' ? variable.value : 0;
     this.value = initial;
 
-    const service = this.getOrAddService(this.Service.Lightbulb, this.name);
+    const service = this.getOrAddService(this.Service.Lightbulb, this.accessory.displayName || this.name);
 
     service.getCharacteristic(this.Characteristic.On)
       .onGet(this.wrapGet<boolean>(() => this.value > this.min));

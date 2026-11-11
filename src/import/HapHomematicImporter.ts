@@ -52,7 +52,9 @@ const SERVICE_ALIASES: Record<string, string> = {
   HomeMaticVariableAccessory: 'VariableSwitchAccessory',
   HomeMaticVariableNumberSensorAccessory: 'VariableNumericSensorAccessory',
   HomeMaticVarBasedThermometerAccessory: 'VariableNumericSensorAccessory',
-  HomeMaticPushTheButtonAccessory: 'ProgrammableSwitchAccessory',
+  // hap-homematic's PushTheButton is an *output*: a HomeKit switch that
+  // sends PRESS_SHORT/PRESS_LONG to the CCU. Not a button sensor.
+  HomeMaticPushTheButtonAccessory: 'KeyPressSwitchAccessory',
   HomeMaticDoorOpenerAccessory: 'DoorOpenerAccessory',
   HomeMaticProgramAccessory: 'ProgramAccessory',
 };
@@ -74,6 +76,40 @@ const SUBTYPE_ALIASES: Record<string, string> = {
   Window: 'window',
 };
 
+/** hap-homematic VariableNumberSensor `Type` -> VariableNumericSensorAccessory variant. */
+const NUMBER_SENSOR_TYPES: Record<string, string> = {
+  Humidity: 'humidity',
+  LuxOmeter: 'light',
+};
+
+/** hap-homematic's default instance id: HAP uuid.generate('0'). */
+export const HAP_HOMEMATIC_DEFAULT_INSTANCE = hapUuid('0');
+
+const MAC_RE = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i;
+const SETUP_ID_RE = /^[0-9A-Z]{4}$/;
+const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
+
+export interface HapHomematicInstance {
+  name?: string;
+  /** HAP username (bridge MAC) of this hap-homematic bridge. */
+  user?: string;
+  pincode?: string;
+  pin?: string;
+  setupID?: string;
+  roomId?: number | string;
+  publishDevices?: boolean;
+}
+
+export interface ImportOptions {
+  /**
+   * CCU channel address -> channel type (e.g. `BLIND_VIRTUAL_RECEIVER`),
+   * from the backup's `devices.json`. Needed to compute hap-homematic's
+   * accessory UUID seeds (`<type>:<name>`). Filled automatically by
+   * `importBackupTarball`.
+   */
+  channelTypes?: Record<string, string>;
+}
+
 export interface ImportReport {
   channels: ChannelMapping[];
   variables: VariableMapping[];
@@ -83,7 +119,9 @@ export interface ImportReport {
     instanceCount: number;
     sourceVersion?: string;
     ccuIp?: string;
-    instances: Record<string, { name?: string }>;
+    instances: Record<string, HapHomematicInstance>;
+    /** Mappings hap-homematic does not publish (their instance no longer exists). */
+    skipped?: Array<{ kind: 'channel' | 'variable' | 'program'; id: string; instance: string }>;
   };
 }
 
@@ -93,11 +131,27 @@ export interface BridgeImportBlock {
   instanceUuid: string;
   /** Display name shown in the Home app. */
   name: string;
-  /** `_bridge` identity for the child-bridge feature. */
-  bridge: { username: string; port: number };
+  /**
+   * `_bridge` identity for the child-bridge feature. With
+   * `preserveIdentity` it carries the hap-homematic bridge's username,
+   * pin and setupID so a transplanted pairing stays valid.
+   */
+  bridge: { username: string; port: number; pin?: string; setupID?: string; name?: string };
+  /** True when mappings carry hap-homematic `uuidSeed`s (see ResolvedConfig). */
+  hapHomematicIdentity: boolean;
   channels: ChannelMapping[];
   variables: VariableMapping[];
   programs: ProgramMapping[];
+}
+
+export interface SplitOptions {
+  /**
+   * Reuse each hap-homematic bridge's HomeKit identity (username, pin,
+   * setupID, accessory UUIDs). Only useful together with copying that
+   * bridge's `persist/AccessoryInfo.*.json` and `IdentifierCache.*.json`
+   * into Homebridge's persist directory; see the migration doc.
+   */
+  preserveIdentity?: boolean;
 }
 
 export interface HapHomematicConfigShape {
@@ -108,10 +162,14 @@ export interface HapHomematicConfigShape {
   mappings?: Record<string, {
     Service?: string;
     Type?: string;
-    instance?: string;
+    /** hap-homematic stores a list of instance ids; older/hand-made configs a string. */
+    instance?: string | string[];
+    name?: string;
+    /** hap-homematic keeps per-service settings (incl. `Type`) nested here. */
+    settings?: Record<string, unknown>;
     [k: string]: unknown;
   }>;
-  instances?: Record<string, { name?: string; user?: string; pin?: string; setupID?: string }>;
+  instances?: Record<string, HapHomematicInstance>;
   version?: string;
 }
 
@@ -129,11 +187,41 @@ export async function importBackupTarball(tarball: Buffer): Promise<ImportReport
   if (tarball.length > MAX_TARBALL_BYTES) {
     throw new ImportError(`Tarball larger than ${MAX_TARBALL_BYTES / (1024 * 1024)} MiB`);
   }
-  const configJson = await extractConfigJson(tarball);
-  return importConfigJson(configJson);
+  const files = await extractJsonFiles(tarball, ['config.json', 'devices.json']);
+  const configJson = files.get('config.json');
+  if (!configJson) {
+    throw new ImportError('No config.json found in backup');
+  }
+  const devicesJson = files.get('devices.json');
+  return importConfigJson(configJson as HapHomematicConfigShape, {
+    channelTypes: devicesJson ? channelTypesFromDevicesJson(devicesJson) : undefined,
+  });
 }
 
-export function importConfigJson(raw: HapHomematicConfigShape | string): ImportReport {
+/** `devices.json` (hap-homematic's CCU cache) -> channel address -> channel type. */
+export function channelTypesFromDevicesJson(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const devices = (raw as { devices?: unknown })?.devices;
+  if (!Array.isArray(devices)) {
+    return out;
+  }
+  for (const d of devices) {
+    const chans = (d as { channels?: unknown })?.channels;
+    if (!Array.isArray(chans)) continue;
+    for (const c of chans) {
+      const address = (c as { address?: unknown })?.address;
+      const type = (c as { type?: unknown })?.type;
+      if (typeof address === 'string' && typeof type === 'string' && type.length > 0) {
+        out[address] = type;
+      }
+    }
+  }
+  return out;
+}
+
+type RawMapping = NonNullable<HapHomematicConfigShape['mappings']>[string];
+
+export function importConfigJson(raw: HapHomematicConfigShape | string, options: ImportOptions = {}): ImportReport {
   const config: HapHomematicConfigShape = typeof raw === 'string' ? safeParse(raw) : raw;
   if (!config || typeof config !== 'object') {
     throw new ImportError('Invalid config payload');
@@ -143,20 +231,57 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
   const channels: ChannelMapping[] = [];
   const variables: VariableMapping[] = [];
   const programs: ProgramMapping[] = [];
+  const skipped: NonNullable<ImportReport['meta']['skipped']> = [];
+  const instances = config.instances ?? {};
+  const channelTypes = options.channelTypes ?? {};
+
+  /**
+   * hap-homematic semantics: a mapping is published on the bridges listed
+   * in `instance` (an array); without one it goes to the default instance.
+   * A mapping whose instances no longer exist is not published at all, so
+   * importing it would create an accessory HomeKit never had.
+   */
+  const resolveInstance = (kind: 'channel' | 'variable' | 'program', id: string, mapping: RawMapping): string | undefined | null => {
+    const list = Array.isArray(mapping.instance)
+      ? mapping.instance.filter((i): i is string => typeof i === 'string' && i.length > 0)
+      : typeof mapping.instance === 'string' && mapping.instance.length > 0 ? [mapping.instance] : [];
+    if (Object.keys(instances).length === 0) {
+      return list[0];
+    }
+    if (list.length === 0) {
+      return undefined;
+    }
+    const known = list.filter((i) => i in instances);
+    if (known.length === 0) {
+      skipped.push({ kind, id, instance: list[0]! });
+      warnings.push(`${kind} ${id}: its hap-homematic bridge no longer exists, so hap-homematic does not publish it; skipped`);
+      return null;
+    }
+    if (known.length > 1) {
+      warnings.push(`${kind} ${id} is published on ${known.length} hap-homematic bridges; only the first is migrated`);
+    }
+    return known[0];
+  };
 
   for (const address of config.channels ?? []) {
     if (typeof address !== 'string' || address.length === 0) {
       continue;
     }
-    const mapping = config.mappings?.[address] ?? {};
+    const mapping: RawMapping = config.mappings?.[address] ?? {};
     const sourceService = mapping.Service ?? '';
     const service = SERVICE_ALIASES[sourceService];
     if (!service) {
       warnings.push(`Could not map service "${sourceService || '?'}" for channel ${address} — skipped`);
       continue;
     }
-    const subtype = mapping.Type
-      ? SUBTYPE_ALIASES[mapping.Type] ?? SERVICE_DEFAULT_SUBTYPE[sourceService]
+    const instance = resolveInstance('channel', address, mapping);
+    if (instance === null) {
+      continue;
+    }
+    const settings = flattenSettings(mapping);
+    const type = typeof settings.Type === 'string' ? settings.Type : undefined;
+    const subtype = type
+      ? SUBTYPE_ALIASES[type] ?? SERVICE_DEFAULT_SUBTYPE[sourceService]
       : SERVICE_DEFAULT_SUBTYPE[sourceService];
     // hap-homematic stores the user-customised HomeKit display name under
     // `name`. Lift it to the top-level mapping field so the platform can
@@ -164,50 +289,73 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
     // raw HomeMatic name from the CCU).
     const customName = typeof mapping.name === 'string' && mapping.name.length > 0
       ? mapping.name : undefined;
-    channels.push({
+    const channelType = channelTypes[address];
+    channels.push(withoutUndefined({
       address,
       name: customName,
       service,
       subtype,
-      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
-      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance', 'name']),
-    });
+      instance,
+      settings: dropKeys(settings, ['Type']),
+      // hap-homematic: uuid.generate(`${channel.type}:${name}`)
+      uuidSeed: customName && channelType ? `${channelType}:${customName}` : undefined,
+    }));
   }
 
   for (const name of config.variables ?? []) {
     if (typeof name !== 'string' || name.length === 0) {
       continue;
     }
-    const mapping = config.mappings?.[name] ?? {};
+    // hap-homematic keys variable mappings by `<name>:0`.
+    const mapping: RawMapping = config.mappings?.[`${name}:0`] ?? config.mappings?.[name] ?? {};
     const sourceService = mapping.Service ?? '';
     const service = SERVICE_ALIASES[sourceService];
     if (sourceService && !service) {
       warnings.push(`Could not map variable service "${sourceService}" for "${name}" — kept with default mapping`);
     }
+    const instance = resolveInstance('variable', name, mapping);
+    if (instance === null) {
+      continue;
+    }
+    const settings = flattenSettings(mapping);
+    const type = typeof settings.Type === 'string' ? settings.Type : undefined;
+    let subtype = SERVICE_DEFAULT_SUBTYPE[sourceService];
+    if (sourceService === 'HomeMaticVariableNumberSensorAccessory' && type) {
+      subtype = NUMBER_SENSOR_TYPES[type];
+      if (!subtype) {
+        warnings.push(`Variable "${name}": sensor type "${type}" has no equivalent; it will be derived from the variable's unit`);
+      }
+    }
     const customName = typeof mapping.name === 'string' && mapping.name.length > 0
       ? mapping.name : undefined;
-    variables.push({
+    variables.push(withoutUndefined({
       name,
       displayName: customName,
       service,
-      subtype: SERVICE_DEFAULT_SUBTYPE[sourceService],
-      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
-      settings: dropKnownKeys(mapping, ['Service', 'Type', 'instance', 'name']),
-    });
+      subtype,
+      instance,
+      settings: dropKeys(settings, ['Type']),
+      // hap-homematic variables have no channel type: `undefined:<name>`.
+      uuidSeed: customName ? `undefined:${customName}` : undefined,
+    }));
   }
 
   for (const name of config.programs ?? []) {
     if (typeof name !== 'string' || name.length === 0) {
       continue;
     }
-    const mapping = config.mappings?.[name] ?? {};
+    const mapping: RawMapping = config.mappings?.[`${name}:0`] ?? config.mappings?.[name] ?? {};
+    const instance = resolveInstance('program', name, mapping);
+    if (instance === null) {
+      continue;
+    }
     const customName = typeof mapping.name === 'string' && mapping.name.length > 0
       ? mapping.name : undefined;
-    programs.push({
+    programs.push(withoutUndefined({
       name,
       displayName: customName,
-      instance: typeof mapping.instance === 'string' ? mapping.instance : undefined,
-    });
+      instance,
+    }));
   }
 
   return {
@@ -216,23 +364,26 @@ export function importConfigJson(raw: HapHomematicConfigShape | string): ImportR
     programs,
     warnings,
     meta: {
-      instanceCount: Object.keys(config.instances ?? {}).length,
+      instanceCount: Object.keys(instances).length,
       sourceVersion: config.version,
       ccuIp: config.ccuIP,
-      instances: config.instances ?? {},
+      instances,
+      skipped,
     },
   };
 }
 
 /** Merge an ImportReport into an existing ResolvedConfig (channels, variables, programs). */
 export function mergeIntoConfig(target: Partial<ResolvedConfig>, report: ImportReport): Partial<ResolvedConfig> {
+  // Merging several hap-homematic bridges into one bridge always creates
+  // new HomeKit identities, so the hap-homematic UUID seeds do not apply.
   const existingChannels = new Map((target.channels ?? []).map((m) => [m.address, m]));
   for (const m of report.channels) {
-    existingChannels.set(m.address, m);
+    existingChannels.set(m.address, stripSeed(m));
   }
   const existingVars = new Map((target.variables ?? []).map((m) => [m.name, m]));
   for (const m of report.variables) {
-    existingVars.set(m.name, m);
+    existingVars.set(m.name, stripSeed(m));
   }
   const existingProgs = new Map((target.programs ?? []).map((m) => [m.name, m]));
   for (const m of report.programs) {
@@ -256,47 +407,87 @@ export function mergeIntoConfig(target: Partial<ResolvedConfig>, report: ImportR
  * the same identities, which preserves Homebridge child-bridge pairing
  * across runs.
  */
-export function splitReportIntoBridges(report: ImportReport): BridgeImportBlock[] {
+export function splitReportIntoBridges(report: ImportReport, options: SplitOptions = {}): BridgeImportBlock[] {
+  const preserve = options.preserveIdentity === true;
   const instances = report.meta.instances ?? {};
   const uuids = Object.keys(instances);
+  const seedFilter = <T extends { uuidSeed?: string }>(m: T): T => (preserve ? { ...m } : stripSeed(m));
 
   if (uuids.length === 0) {
+    if (preserve) {
+      throw new ImportError('preserveIdentity needs the hap-homematic instances (bridge identities) from the backup');
+    }
     return [{
       instanceUuid: 'default',
       name: 'HomematicHap',
       bridge: bridgeIdentityFor('default'),
-      channels: [...report.channels],
-      variables: [...report.variables],
+      hapHomematicIdentity: false,
+      channels: report.channels.map(seedFilter),
+      variables: report.variables.map(seedFilter),
       programs: [...report.programs],
     }];
   }
 
   const blocks = new Map<string, BridgeImportBlock>();
   for (const uuid of uuids) {
+    const inst = instances[uuid] ?? {};
     blocks.set(uuid, {
       instanceUuid: uuid,
-      name: instances[uuid]?.name ?? `HomematicHap-${uuid.slice(0, 8)}`,
-      bridge: bridgeIdentityFor(uuid),
+      name: hapHomematicBridgeName(inst.name) ?? `HomematicHap-${uuid.slice(0, 8)}`,
+      bridge: preserve ? preservedBridgeIdentity(uuid, inst) : bridgeIdentityFor(uuid),
+      hapHomematicIdentity: preserve,
       channels: [],
       variables: [],
       programs: [],
     });
   }
 
-  // Anything we can't trace back to an instance lands in the first block.
-  const fallbackUuid = uuids[0]!;
+  // Mappings without an instance go where hap-homematic put them: the
+  // default instance if it exists, otherwise the first block.
+  const fallbackUuid = blocks.has(HAP_HOMEMATIC_DEFAULT_INSTANCE) ? HAP_HOMEMATIC_DEFAULT_INSTANCE : uuids[0]!;
   const targetFor = (instance?: string): BridgeImportBlock => {
     const direct = instance ? blocks.get(instance) : undefined;
     return direct ?? blocks.get(fallbackUuid)!;
   };
-  const placeChannel = (m: ChannelMapping): void => { targetFor(m.instance).channels.push(m); };
-  const placeVariable = (m: VariableMapping): void => { targetFor(m.instance).variables.push(m); };
-  const placeProgram = (m: ProgramMapping): void => { targetFor(m.instance).programs.push(m); };
-  report.channels.forEach(placeChannel);
-  report.variables.forEach(placeVariable);
-  report.programs.forEach(placeProgram);
+  report.channels.forEach((m) => { targetFor(m.instance).channels.push(seedFilter(m)); });
+  report.variables.forEach((m) => { targetFor(m.instance).variables.push(seedFilter(m)); });
+  report.programs.forEach((m) => { targetFor(m.instance).programs.push({ ...m }); });
 
-  return Array.from(blocks.values());
+  // Bridges without accessories are not worth a Homebridge child process.
+  const all = Array.from(blocks.values());
+  const nonEmpty = all.filter((b) => b.channels.length + b.variables.length + b.programs.length > 0);
+  return nonEmpty.length > 0 ? nonEmpty : all;
+}
+
+/** hap-homematic's bridge name: `HomeMatic <instance name>` with `.:#_()-` blanked. */
+export function hapHomematicBridgeName(instanceName: string | undefined): string | undefined {
+  if (typeof instanceName !== 'string' || instanceName.length === 0) {
+    return undefined;
+  }
+  return `HomeMatic ${instanceName.replace(/[.:#_()-]/g, ' ')}`;
+}
+
+function preservedBridgeIdentity(uuid: string, inst: HapHomematicInstance): BridgeImportBlock['bridge'] {
+  const user = typeof inst.user === 'string' ? inst.user.toUpperCase() : '';
+  if (!MAC_RE.test(user)) {
+    throw new ImportError(`hap-homematic bridge "${inst.name ?? uuid}" has no valid HAP username; cannot preserve its identity`);
+  }
+  const pin = typeof inst.pincode === 'string' ? inst.pincode : inst.pin;
+  const identity: BridgeImportBlock['bridge'] = {
+    username: user,
+    port: bridgeIdentityFor(uuid).port,
+  };
+  if (typeof pin === 'string' && PIN_RE.test(pin)) {
+    identity.pin = pin;
+  }
+  if (typeof inst.setupID === 'string' && SETUP_ID_RE.test(inst.setupID)) {
+    identity.setupID = inst.setupID;
+  }
+  const name = hapHomematicBridgeName(inst.name);
+  if (name) {
+    identity.name = name;
+  }
+  return identity;
 }
 
 /**
@@ -323,17 +514,51 @@ export function bridgeIdentityFor(seed: string): { username: string; port: numbe
 
 // --- internals -------------------------------------------------------
 
-async function extractConfigJson(tarball: Buffer): Promise<HapHomematicConfigShape> {
-  return new Promise<HapHomematicConfigShape>((resolve, reject) => {
-    let resolved = false;
+/**
+ * HAP-NodeJS `uuid.generate`: SHA-1 hex digits poured into the template
+ * `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx` (the literal 4 consumes no digit,
+ * `y` gets the RFC 4122 variant bits).
+ */
+export function hapUuid(seed: string): string {
+  const h = createHash('sha1').update(seed).digest('hex');
+  let i = -1;
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    i += 1;
+    const digit = h[i]!;
+    return c === 'y' ? ((parseInt(digit, 16) & 0x3) | 0x8).toString(16) : digit;
+  });
+}
+
+/** Top-level archive member (`config.json`, `./config.json`), not `etc/config.json`. */
+function topLevelName(path: string): string | undefined {
+  const p = path.replace(/^\.\//, '');
+  return p.includes('/') ? undefined : p;
+}
+
+/**
+ * Parse the named top-level JSON members out of a .tar.gz without
+ * touching the filesystem (`tar.list` is parse-only, unlike
+ * `tar.extract`, which matters inside a long-lived Homebridge process).
+ */
+async function extractJsonFiles(tarball: Buffer, names: string[]): Promise<Map<string, unknown>> {
+  return new Promise<Map<string, unknown>>((resolve, reject) => {
+    const found = new Map<string, unknown>();
+    let failed = false;
+    const fail = (err: Error): void => {
+      if (!failed) {
+        failed = true;
+        reject(err);
+      }
+    };
     const stream = Readable.from(tarball);
-    // `tar.list` is parse-only — unlike `tar.extract` it never writes
-    // files to disk, which matters because we run inside a long-lived
-    // Homebridge process whose cwd we should never modify.
     const parser = tarList({
-      filter: (path) => path.endsWith('config.json'),
+      filter: (path) => {
+        const n = topLevelName(path);
+        return n !== undefined && names.includes(n);
+      },
       onReadEntry: (entry) => {
-        if (resolved) {
+        const name = topLevelName(entry.path)!;
+        if (found.has(name)) {
           entry.resume();
           return;
         }
@@ -342,42 +567,27 @@ async function extractConfigJson(tarball: Buffer): Promise<HapHomematicConfigSha
         entry.on('data', (chunk: Buffer) => {
           total += chunk.length;
           if (total > MAX_CONFIG_JSON_BYTES) {
-            entry.destroy(new ImportError('config.json too large'));
+            entry.destroy(new ImportError(`${name} too large`));
             return;
           }
           chunks.push(chunk);
         });
         entry.on('end', () => {
-          if (resolved) {
-            return;
-          }
-          resolved = true;
           try {
-            const parsed = safeParse(Buffer.concat(chunks).toString('utf8'));
-            resolve(parsed);
+            found.set(name, safeParse(Buffer.concat(chunks).toString('utf8')));
           } catch (err) {
-            reject(err);
+            fail(err as Error);
           }
         });
-        entry.on('error', (err) => {
-          if (!resolved) {
-            resolved = true;
-            reject(err);
-          }
-        });
+        entry.on('error', (err) => fail(err as Error));
       },
     });
     parser.on('end', () => {
-      if (!resolved) {
-        reject(new ImportError('No config.json found in backup'));
+      if (!failed) {
+        resolve(found);
       }
     });
-    parser.on('error', (err: Error) => {
-      if (!resolved) {
-        resolved = true;
-        reject(err);
-      }
-    });
+    parser.on('error', (err: Error) => fail(err));
     stream.pipe(parser as unknown as NodeJS.WritableStream);
   });
 }
@@ -397,7 +607,7 @@ function safeParse(text: string): HapHomematicConfigShape {
   }
 }
 
-function dropKnownKeys<T extends Record<string, unknown>>(obj: T, keys: string[]): Record<string, unknown> {
+function dropKeys(obj: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (!keys.includes(k)) {
@@ -405,4 +615,31 @@ function dropKnownKeys<T extends Record<string, unknown>>(obj: T, keys: string[]
     }
   }
   return out;
+}
+
+/**
+ * hap-homematic keeps service settings in `mapping.settings`; hand-made or
+ * older configs put them next to `Service`. Merge both levels (nested wins)
+ * and drop the keys that are lifted elsewhere.
+ */
+function flattenSettings(mapping: RawMapping): Record<string, unknown> {
+  const top = dropKeys(mapping as Record<string, unknown>, ['Service', 'instance', 'name', 'settings']);
+  const nested = mapping.settings && typeof mapping.settings === 'object' && !Array.isArray(mapping.settings)
+    ? mapping.settings : {};
+  return { ...top, ...nested };
+}
+
+function stripSeed<T extends { uuidSeed?: string }>(m: T): T {
+  const { uuidSeed: _drop, ...rest } = m;
+  return rest as T;
+}
+
+function withoutUndefined<T extends object>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      out[k] = v;
+    }
+  }
+  return out as T;
 }

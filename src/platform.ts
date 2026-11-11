@@ -9,15 +9,17 @@
  *   shutdown             — stop CCU client (event server + RPC subs)
  */
 
-import {
-  APIEvent,
-  type API,
-  type Characteristic,
-  type DynamicPlatformPlugin,
-  type Logging,
-  type PlatformAccessory,
-  type PlatformConfig,
-  type Service,
+// Type-only: a runtime import of 'homebridge' breaks when the plugin is
+// installed outside Homebridge's node_modules (e.g. a linked checkout),
+// failing with "Cannot find package 'homebridge'".
+import type {
+  API,
+  Characteristic,
+  DynamicPlatformPlugin,
+  Logging,
+  PlatformAccessory,
+  PlatformConfig,
+  Service,
 } from 'homebridge';
 import { CcuClient } from './ccu/CcuClient.js';
 import {
@@ -28,15 +30,20 @@ import {
   PROGRAM_SERVICE_DEFINITIONS,
 } from './services/registry.js';
 import type { ChannelService, ProgramService, ServiceContext, VariableService } from './services/types.js';
-import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
+import { PLATFORM_NAME, PLUGIN_NAME, PLUGIN_VERSION } from './settings.js';
+import { MultiBridgeHost } from './multiBridge/MultiBridgeHost.js';
+import { persistIdentityStore } from './multiBridge/identityStore.js';
 import type {
   AccessoryContext,
   CcuChannel,
+  CcuDevice,
+  CcuVariable,
   RawConfig,
   ResolvedConfig,
 } from './types.js';
 import { ConfigError, resolveConfig } from './util/config.js';
 import { PrefixedLogger } from './util/logger.js';
+import { channelDisplayName, findChannel, programDisplayName, variableDisplayName } from './util/mappings.js';
 import { PluginStorage } from './util/storage.js';
 
 interface ManagedAccessory {
@@ -55,6 +62,10 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
   private readonly ccu: CcuClient | undefined;
   private readonly cachedAccessories = new Map<string, PlatformAccessory<AccessoryContext>>();
   private readonly managed = new Map<string, ManagedAccessory>();
+  /** Per-launch memo so N mapped channels cost one CCU device listing, not N. */
+  private devicesMemo: Promise<CcuDevice[]> | undefined;
+  private variablesMemo: Promise<CcuVariable[]> | undefined;
+  private readonly multiBridgeHost: MultiBridgeHost | undefined;
 
   constructor(log: Logging, config: PlatformConfig, api: API) {
     this.api = api;
@@ -76,12 +87,23 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
 
     this.ccu = new CcuClient({ config: this.resolved, log: this.log.child('ccu') });
 
-    this.api.on(APIEvent.DID_FINISH_LAUNCHING, () => {
+    if (this.resolved.multiBridge) {
+      this.multiBridgeHost = new MultiBridgeHost({
+        hap: api.hap,
+        ccu: this.ccu,
+        config: this.resolved.multiBridge,
+        log: this.log.child('multi'),
+        version: PLUGIN_VERSION,
+        identityStore: persistIdentityStore(api.user.persistPath()),
+      });
+    }
+
+    this.api.on('didFinishLaunching', () => {
       this.didFinishLaunching().catch((err) => {
         this.log.error('Startup failed: %s', (err as Error).message);
       });
     });
-    this.api.on(APIEvent.SHUTDOWN, () => {
+    this.api.on('shutdown', () => {
       this.shutdown().catch((err) => {
         this.log.warn('Shutdown error: %s', (err as Error).message);
       });
@@ -104,6 +126,15 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     if (!this.resolved || !this.ccu) {
       return;
     }
+    if (this.multiBridgeHost) {
+      // The host publishes its own HAP bridges; this block's own (child)
+      // bridge carries no accessories. Cached ones are left untouched.
+      if (this.cachedAccessories.size > 0) {
+        this.log.warn('Multi-bridge mode ignores %d cached accessories of this block', this.cachedAccessories.size);
+      }
+      await this.multiBridgeHost.start();
+      return;
+    }
     await this.storage.ensureRoot();
     await this.ccu.start();
     this.log.success('Connected to CCU at %s', this.resolved.ccuIp);
@@ -113,7 +144,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
 
     for (const mapping of this.resolved.channels) {
       try {
-        const uuid = this.api.hap.uuid.generate(`channel:${mapping.address}`);
+        const uuid = this.accessoryUuid(`channel:${mapping.address}`, mapping.uuidSeed);
         seen.add(uuid);
         await this.attachChannel(uuid, mapping.address, mapping);
       } catch (err) {
@@ -123,12 +154,9 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
 
     for (const mapping of this.resolved.variables) {
       try {
-        const uuid = this.api.hap.uuid.generate(`variable:${mapping.name}`);
+        const uuid = this.accessoryUuid(`variable:${mapping.name}`, mapping.uuidSeed);
         seen.add(uuid);
-        const legacyName = typeof mapping.settings?.name === 'string'
-          ? (mapping.settings.name as string) : undefined;
-        const dn = mapping.displayName ?? legacyName;
-        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, dn);
+        await this.attachVariable(uuid, mapping.name, mapping.service, mapping.settings, variableDisplayName(mapping), mapping.subtype);
       } catch (err) {
         this.log.warn('Skipping variable %s: %s', mapping.name, (err as Error).message);
       }
@@ -138,13 +166,14 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       try {
         const uuid = this.api.hap.uuid.generate(`program:${mapping.name}`);
         seen.add(uuid);
-        const legacyName = typeof mapping.settings?.name === 'string'
-          ? (mapping.settings.name as string) : undefined;
-        await this.attachProgram(uuid, mapping.name, mapping.displayName ?? legacyName);
+        await this.attachProgram(uuid, mapping.name, programDisplayName(mapping));
       } catch (err) {
         this.log.warn('Skipping program %s: %s', mapping.name, (err as Error).message);
       }
     }
+
+    this.devicesMemo = undefined;
+    this.variablesMemo = undefined;
 
     // Drop cached accessories that are no longer in config.
     const toRemove: PlatformAccessory[] = [];
@@ -161,6 +190,10 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
   }
 
   private async shutdown(): Promise<void> {
+    if (this.multiBridgeHost) {
+      await this.multiBridgeHost.stop();
+      return;
+    }
     for (const m of this.managed.values()) {
       try {
         m.handler.dispose?.();
@@ -178,7 +211,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
   private async attachChannel(
     uuid: string,
     address: string,
-    mapping: { address: string; service: string; subtype?: string; settings?: Record<string, unknown>; name?: string },
+    mapping: { address: string; service: string; subtype?: string; settings?: Record<string, unknown>; name?: string; uuidSeed?: string },
   ): Promise<void> {
     /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
@@ -192,18 +225,8 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
 
     const channel: CcuChannel = await this.fetchChannel(address, mapping.name);
     // mapping.name is the user-customised HomeKit display name (set in the
-    // GUI or imported from hap-homematic). Falls back to the CCU's channel
-    // name when the user hasn't overridden it.
-    //
-    // Pre-0.1.5 imports stored the custom name nested under settings.name
-    // because the importer's drop-list excluded it. Pick it up from there
-    // so users don't have to re-import.
-    const settingsName = typeof mapping.settings?.name === 'string'
-      ? (mapping.settings.name as string)
-      : undefined;
-    const displayName = (mapping.name && mapping.name.length > 0 && mapping.name)
-      || (settingsName && settingsName.length > 0 ? settingsName : undefined)
-      || channel.name;
+    // GUI or imported from hap-homematic); see channelDisplayName.
+    const displayName = channelDisplayName(mapping, channel);
     const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, displayName, {
       kind: 'channel',
       id: address,
@@ -211,6 +234,7 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       subtype: mapping.subtype,
       settings: mapping.settings,
       name: displayName,
+      legacyLayout: this.usesLegacyIdentity(mapping.uuidSeed),
     });
     const ctx: ServiceContext = {
       accessory,
@@ -220,7 +244,10 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
       Characteristic: this.Characteristic,
     };
     const handler = def.build(ctx);
-    handler.attach(channel);
+    // Services name their HAP services after the channel. Use the HomeKit
+    // name (as hap-homematic did), not the raw CCU channel name, which often
+    // contains characters HomeKit rejects (`OG:Bad:Rollo`, `HmIP-WTH-2 0001…:1`).
+    handler.attach({ ...channel, name: displayName });
     this.managed.set(uuid, { accessory, handler });
   }
 
@@ -228,15 +255,17 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     uuid: string,
     name: string,
     serviceKey: string | undefined,
-    _settings: Record<string, unknown> | undefined,
+    settings: Record<string, unknown> | undefined,
     displayName?: string,
+    subtype?: string,
   ): Promise<void> {
     /* c8 ignore start — unreachable: didFinishLaunching gates on ccu */
     if (!this.ccu) {
       return;
     }
     /* c8 ignore stop */
-    const variables = await this.ccu.listVariables();
+    this.variablesMemo ??= this.ccu.listVariables();
+    const variables = await this.variablesMemo;
     const variable = variables.find((v) => v.name === name);
     if (!variable) {
       throw new Error(`Variable not found on CCU: ${name}`);
@@ -244,11 +273,15 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     const explicit = serviceKey ? findVariableServiceByKey(serviceKey) : undefined;
     const def = explicit ?? pickVariableService(variable.valuetype);
     const finalName = displayName && displayName.length > 0 ? displayName : name;
+    const seed = this.resolved?.variables.find((m) => m.name === name)?.uuidSeed;
     const accessory = this.getOrCreateAccessory<AccessoryContext>(uuid, finalName, {
       kind: 'variable',
       id: name,
       service: def.key,
+      subtype,
+      settings,
       name: finalName,
+      legacyLayout: this.usesLegacyIdentity(seed),
     });
     const ctx: ServiceContext = {
       accessory,
@@ -293,21 +326,23 @@ export class HomematicPlatform implements DynamicPlatformPlugin {
     if (!this.ccu) {
       throw new Error('CCU client not initialized');
     }
-    const devices = await this.ccu.listDevices();
-    for (const device of devices) {
-      const channel = device.channels.find((c) => c.address === address);
-      if (channel) {
-        return channel;
-      }
-    }
-    // Channel not currently visible — fall back to a stub so the accessory
-    // still registers; events for it will still flow when the CCU sees it.
-    return {
-      address,
-      index: 0,
-      name: fallbackName ?? address,
-      type: 'UNKNOWN',
-    };
+    this.devicesMemo ??= this.ccu.listDevices();
+    return findChannel(await this.devicesMemo, address, fallbackName);
+  }
+
+  /**
+   * Accessory UUID. With `hapHomematicIdentity` and a `uuidSeed` from the
+   * importer, reuse hap-homematic's UUID so HomeKit keeps the accessory
+   * (name, room, automations) when its bridge identity is transplanted.
+   */
+  private accessoryUuid(defaultSeed: string, uuidSeed: string | undefined): string {
+    const seed = this.usesLegacyIdentity(uuidSeed) ? uuidSeed! : defaultSeed;
+    return this.api.hap.uuid.generate(seed);
+  }
+
+  private usesLegacyIdentity(uuidSeed: string | undefined): boolean {
+    return this.resolved?.hapHomematicIdentity === true
+      && typeof uuidSeed === 'string' && uuidSeed.length > 0;
   }
 
   private getOrCreateAccessory<T extends AccessoryContext>(

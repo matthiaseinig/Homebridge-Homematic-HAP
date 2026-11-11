@@ -8,16 +8,15 @@
  * Services subclass this and implement attach().
  */
 
-import type { Characteristic, CharacteristicValue, PlatformAccessory, Service, WithUUID } from 'homebridge';
+import type { Characteristic, CharacteristicValue, Service, WithUUID } from 'homebridge';
 import type { CcuClient } from '../ccu/CcuClient.js';
 import type { PrefixedLogger } from '../util/logger.js';
-import type { AccessoryContext } from '../types.js';
-import type { ServiceContext } from './types.js';
+import type { AccessoryHandle, ServiceContext } from './types.js';
 
 export type DatapointListener = (value: unknown) => void;
 
 export abstract class AccessoryBase {
-  protected readonly accessory: PlatformAccessory<AccessoryContext>;
+  protected readonly accessory: AccessoryHandle;
   protected readonly ccu: CcuClient;
   protected readonly log: PrefixedLogger;
   protected readonly Service: typeof Service;
@@ -33,7 +32,20 @@ export abstract class AccessoryBase {
     this.Characteristic = ctx.Characteristic;
   }
 
-  protected getOrAddService<T extends WithUUID<typeof Service>>(svc: T, name?: string, subtype?: string): Service {
+  /**
+   * @param legacy Subtype to use when the accessory reuses a hap-homematic
+   *   identity (`context.legacyLayout`). hap-homematic created most services
+   *   with the service UUID as subtype; pass `null` for services it created
+   *   without one (e.g. Thermostat), or a string for its explicit subtypes.
+   *   Ignored for accessories with their own identity.
+   */
+  protected getOrAddService<T extends WithUUID<typeof Service>>(
+    svc: T,
+    name?: string,
+    requestedSubtype?: string,
+    legacy?: string | null,
+  ): Service {
+    const subtype = this.resolveSubtype(svc, requestedSubtype, legacy);
     const existing = subtype === undefined
       ? this.accessory.getService(svc)
       : this.accessory.getServiceById(svc, subtype);
@@ -53,6 +65,24 @@ export abstract class AccessoryBase {
         subtype,
       );
     return this.accessory.addService(instance);
+  }
+
+  protected isLegacyLayout(): boolean {
+    return this.accessory.context?.legacyLayout === true;
+  }
+
+  private resolveSubtype(
+    svc: WithUUID<typeof Service>,
+    requested: string | undefined,
+    legacy: string | null | undefined,
+  ): string | undefined {
+    if (!this.isLegacyLayout()) {
+      return requested;
+    }
+    if (legacy === null) {
+      return undefined;
+    }
+    return legacy ?? (svc as unknown as { UUID: string }).UUID;
   }
 
   /**

@@ -7,3 +7,5 @@
 
 export const PLATFORM_NAME = 'HomematicHap';
 export const PLUGIN_NAME = 'homebridge-homematic-hap';
+/** Kept equal to package.json `version` (unit-tested). */
+export const PLUGIN_VERSION = '1.4.0';

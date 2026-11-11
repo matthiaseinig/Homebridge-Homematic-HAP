@@ -1,125 +1,122 @@
-import { AccessoryBase } from "../AccessoryBase.js";
-import { toFiniteNumber } from "../../util/sanitize.js";
+import { AccessoryBase } from '../AccessoryBase.js';
+import { toFiniteNumber } from '../../util/sanitize.js';
+/**
+ * Energy / power meter (HmIP-PSM, HmIP-FSM, HmIP-FSI, HM-ES-PMSw1-Pl, …).
+ * Binds to the ENERGIE_METER_TRANSMITTER channel and exposes Eve's
+ * Voltage / ElectricCurrent / ElectricPower / TotalConsumption custom
+ * characteristics on a HomeKit Outlet service. Eve and Apple's Home app
+ * will display these — generic HomeKit clients ignore them but still see
+ * the Outlet "in use" indicator.
+ *
+ * Eve characteristic UUIDs are documented at
+ *   https://github.com/simont77/fakegato-history/wiki and
+ *   https://github.com/homespun/homebridge-platform-eve
+ * The values are reproduced inline here so we don't take a dependency.
+ *
+ * The Characteristic instances are constructed at runtime against the
+ * `Characteristic` class supplied via ServiceContext (i.e. the one
+ * Homebridge passes in via `api.hap.Characteristic`). That avoids an
+ * import-time dependency on a specific @homebridge/hap-nodejs version.
+ */
 const POWER_METER_CHANNEL_TYPES = [
-  "ENERGIE_METER_TRANSMITTER",
-  "POWERMETER",
-  "POWERMETER_IGL"
+    'ENERGIE_METER_TRANSMITTER',
+    'POWERMETER',
+    'POWERMETER_IGL',
 ];
-const EVE_VOLTAGE_UUID = "E863F10A-079E-48FF-8F27-9C2605A29F52";
-const EVE_ELECTRIC_CURRENT_UUID = "E863F126-079E-48FF-8F27-9C2605A29F52";
-const EVE_ELECTRIC_POWER_UUID = "E863F10D-079E-48FF-8F27-9C2605A29F52";
-const EVE_TOTAL_CONSUMPTION_UUID = "E863F10C-079E-48FF-8F27-9C2605A29F52";
+const EVE_VOLTAGE_UUID = 'E863F10A-079E-48FF-8F27-9C2605A29F52';
+const EVE_ELECTRIC_CURRENT_UUID = 'E863F126-079E-48FF-8F27-9C2605A29F52';
+const EVE_ELECTRIC_POWER_UUID = 'E863F10D-079E-48FF-8F27-9C2605A29F52';
+const EVE_TOTAL_CONSUMPTION_UUID = 'E863F10C-079E-48FF-8F27-9C2605A29F52';
 class PowerMeterHandler extends AccessoryBase {
-  channelAddress = "";
-  attach(channel) {
-    this.channelAddress = channel.address;
-    const service = this.getOrAddService(this.Service.Outlet, channel.name);
-    const voltage = this.ensureCustomCharacteristic(
-      service,
-      EVE_VOLTAGE_UUID,
-      "Voltage",
-      "V",
-      400,
-      0.1
-    );
-    const current = this.ensureCustomCharacteristic(
-      service,
-      EVE_ELECTRIC_CURRENT_UUID,
-      "Electric Current",
-      "A",
-      100,
-      1e-3
-    );
-    const power = this.ensureCustomCharacteristic(
-      service,
-      EVE_ELECTRIC_POWER_UUID,
-      "Consumption",
-      "W",
-      3500,
-      0.1
-    );
-    const total = this.ensureCustomCharacteristic(
-      service,
-      EVE_TOTAL_CONSUMPTION_UUID,
-      "Total Consumption",
-      "kWh",
-      1e6,
-      1e-3
-    );
-    let lastPowerW = 0;
-    service.getCharacteristic(this.Characteristic.On).onGet(this.wrapGet(() => lastPowerW > 0));
-    service.getCharacteristic(this.Characteristic.OutletInUse).onGet(this.wrapGet(() => lastPowerW > 0.1));
-    const subscribe = (datapoint, apply) => {
-      this.registerListener(this.channelAddress, datapoint, (raw) => {
-        const v = toFiniteNumber(raw);
-        if (v !== void 0) apply(v);
-      });
-      this.ccu.getValue(this.channelAddress, datapoint).then((raw) => {
-        const v = toFiniteNumber(raw);
-        if (v !== void 0) apply(v);
-      }).catch(() => void 0);
-    };
-    subscribe("VOLTAGE", (v) => voltage.updateValue(round(v, 1)));
-    subscribe("CURRENT", (raw) => {
-      current.updateValue(round(raw / 1e3, 3));
-    });
-    subscribe("POWER", (raw) => {
-      lastPowerW = raw;
-      power.updateValue(round(raw, 1));
-      service.updateCharacteristic(this.Characteristic.On, lastPowerW > 0);
-      service.updateCharacteristic(this.Characteristic.OutletInUse, lastPowerW > 0.1);
-    });
-    subscribe("ENERGY_COUNTER", (raw) => {
-      total.updateValue(round(raw / 1e3, 3));
-    });
-  }
-  ensureCustomCharacteristic(service, uuid, displayName, unit, maxValue, minStep) {
-    const existing = findCharacteristicByUuid(service, uuid);
-    if (existing) {
-      return existing;
+    channelAddress = '';
+    attach(channel) {
+        this.channelAddress = channel.address;
+        const service = this.getOrAddService(this.Service.Outlet, channel.name);
+        const voltage = this.ensureCustomCharacteristic(service, EVE_VOLTAGE_UUID, 'Voltage', 'V', 400, 0.1);
+        const current = this.ensureCustomCharacteristic(service, EVE_ELECTRIC_CURRENT_UUID, 'Electric Current', 'A', 100, 0.001);
+        const power = this.ensureCustomCharacteristic(service, EVE_ELECTRIC_POWER_UUID, 'Consumption', 'W', 3500, 0.1);
+        const total = this.ensureCustomCharacteristic(service, EVE_TOTAL_CONSUMPTION_UUID, 'Total Consumption', 'kWh', 1_000_000, 0.001);
+        let lastPowerW = 0;
+        service.getCharacteristic(this.Characteristic.On)
+            .onGet(this.wrapGet(() => lastPowerW > 0));
+        service.getCharacteristic(this.Characteristic.OutletInUse)
+            .onGet(this.wrapGet(() => lastPowerW > 0.1));
+        const subscribe = (datapoint, apply) => {
+            this.registerListener(this.channelAddress, datapoint, (raw) => {
+                const v = toFiniteNumber(raw);
+                if (v !== undefined)
+                    apply(v);
+            });
+            this.ccu.getValue(this.channelAddress, datapoint).then((raw) => {
+                const v = toFiniteNumber(raw);
+                if (v !== undefined)
+                    apply(v);
+            }).catch(() => undefined);
+        };
+        subscribe('VOLTAGE', (v) => voltage.updateValue(round(v, 1)));
+        subscribe('CURRENT', (raw) => {
+            // CCU reports CURRENT in mA. HomeKit/Eve expects A.
+            current.updateValue(round(raw / 1000, 3));
+        });
+        subscribe('POWER', (raw) => {
+            lastPowerW = raw;
+            power.updateValue(round(raw, 1));
+            service.updateCharacteristic(this.Characteristic.On, lastPowerW > 0);
+            service.updateCharacteristic(this.Characteristic.OutletInUse, lastPowerW > 0.1);
+        });
+        subscribe('ENERGY_COUNTER', (raw) => {
+            // CCU reports ENERGY_COUNTER in Wh. Eve expects kWh.
+            total.updateValue(round(raw / 1000, 3));
+        });
     }
-    const props = {
-      format: "float",
-      perms: [
-        "pr",
-        "ev"
-      ],
-      unit,
-      minValue: 0,
-      maxValue,
-      minStep
-    };
-    const Ctor = this.Characteristic;
-    const instance = new Ctor(displayName, uuid, props);
-    service.addCharacteristic(instance);
-    return instance;
-  }
+    ensureCustomCharacteristic(service, uuid, displayName, unit, maxValue, minStep) {
+        const existing = findCharacteristicByUuid(service, uuid);
+        if (existing) {
+            // findCharacteristicByUuid walks an opaque container and returns
+            // unknown; the caller knows it stored a Characteristic instance.
+            return existing;
+        }
+        const props = {
+            format: 'float',
+            perms: ['pr',
+                'ev'],
+            unit,
+            minValue: 0,
+            maxValue,
+            minStep,
+        };
+        const Ctor = this.Characteristic;
+        const instance = new Ctor(displayName, uuid, props);
+        service.addCharacteristic(instance);
+        return instance;
+    }
 }
+// hap-nodejs's Service.characteristics is `Characteristic[]`. Our test stubs
+// use a `Map<string, …>` for ergonomics. Both are iterable; values for the
+// Map come back as `[uuid, char]` tuples, for the Array they come back as
+// raw chars. Walk either shape and return the matching Characteristic.
 function findCharacteristicByUuid(service, uuid) {
-  const chars = service.characteristics;
-  if (!chars || typeof chars[Symbol.iterator] !== "function") {
-    return void 0;
-  }
-  for (const entry of chars) {
-    const ch = Array.isArray(entry) ? entry[1] : entry;
-    if (ch && typeof ch === "object" && ch.UUID === uuid) {
-      return ch;
+    const chars = service.characteristics;
+    if (!chars || typeof chars[Symbol.iterator] !== 'function') {
+        return undefined;
     }
-  }
-  return void 0;
+    for (const entry of chars) {
+        const ch = Array.isArray(entry) ? entry[1] : entry;
+        if (ch && typeof ch === 'object' && ch.UUID === uuid) {
+            return ch;
+        }
+    }
+    return undefined;
 }
 function round(value, digits) {
-  const f = 10 ** digits;
-  return Math.round(value * f) / f;
+    const f = 10 ** digits;
+    return Math.round(value * f) / f;
 }
-const powerMeterService = {
-  key: "PowerMeterAccessory",
-  description: "Energy meter (Voltage / Current / Power / Total)",
-  channelTypes: POWER_METER_CHANNEL_TYPES,
-  priority: 10,
-  build: (ctx) => new PowerMeterHandler(ctx)
-};
-export {
-  powerMeterService
+export const powerMeterService = {
+    key: 'PowerMeterAccessory',
+    description: 'Energy meter (Voltage / Current / Power / Total)',
+    channelTypes: POWER_METER_CHANNEL_TYPES,
+    priority: 10,
+    build: (ctx) => new PowerMeterHandler(ctx),
 };
 //# sourceMappingURL=PowerMeterAccessory.js.map

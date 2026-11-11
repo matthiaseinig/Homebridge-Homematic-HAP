@@ -981,6 +981,21 @@ function drawPicker() {
 
 // --- editChannel: form
 
+/**
+ * Fields of an existing mapping that an edit form does not touch. The
+ * HomeKit identity seed only survives while the entry stays on its bridge.
+ */
+function keptFields(entry, sameBridge, edited) {
+  if (!entry) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(entry)) {
+    if (edited.includes(k)) continue;
+    if (k === 'uuidSeed' && !sameBridge) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function subEditChannel(host, props) {
   const { address, mode } = props;
   const cl = channelLookup();
@@ -1089,6 +1104,10 @@ function subEditChannel(host, props) {
       if (i !== -1) b.channels.splice(i, 1);
     }
     state.blocks[target].channels.push({
+      // Keep fields this form does not edit (instance, uuidSeed, ...): a
+      // migrated hap-homematic accessory must keep its HomeKit identity
+      // when renamed. Moving it to another bridge creates a new identity.
+      ...keptFields(entry, target === bridgeIndex, ['address', 'name', 'service', 'subtype', 'settings', '_info']),
       address, name, service: draft.service,
       ...(draft.subtype ? { subtype: draft.subtype } : {}),
       ...(draft.settings ? { settings: draft.settings } : {}),
@@ -1204,6 +1223,8 @@ function subEditVariable(host, props) {
       if (i !== -1) b.variables.splice(i, 1);
     }
     state.blocks[target].variables.push({
+      // Keep service / subtype / settings / uuidSeed set by an import.
+      ...keptFields(entry, target === bridgeIndex, ['name', 'displayName']),
       name,
       ...((draft.displayName ?? '').trim() ? { displayName: draft.displayName.trim() } : {}),
     });

@@ -79,13 +79,19 @@ is stable for the first time. The core:
   Lightbulb · Dimmer · ColorTempDimmer (tunable white) · RGB light
   (continuous + HmIP-BSL discrete) · Window covering · Window covering
   with slats · Thermostat · Contact / Door / Window · Motion · Smoke ·
-  Leak · Temperature · Humidity · StatelessProgrammableSwitch (push
-  button) · LockMechanism (door opener, momentary) · Lock (Keymatic) ·
+  Leak · Temperature (+ humidity on climate sensors) · Humidity ·
+  StatelessProgrammableSwitch (push button) · Key-press switch (sends
+  PRESS_SHORT / PRESS_LONG, hap-homematic "PushTheButton") ·
+  LockMechanism (door opener, momentary) · Lock (Keymatic) ·
   Power / energy meter (Eve characteristics) · Variable as Switch /
   Lightbulb / numeric Sensor · Program as triggerable Switch
 - Multi-bridge import: each `instance` in your hap-homematic config
   becomes its own Homebridge child bridge with a deterministic
-  `_bridge: { username, port }` derived from the source UUID
+  `_bridge: { username, port }` derived from the source UUID, or, with
+  `scripts/hap-homematic-to-config.mjs --preserve-identity`, with the
+  hap-homematic bridge's own HomeKit identity so the Home app keeps
+  accessories, rooms and automations (see
+  [docs/IMPORT-FROM-HAP-HOMEMATIC.md](docs/IMPORT-FROM-HAP-HOMEMATIC.md))
 - A Bootstrap-5-styled custom UI (no SPA framework) for connection
   testing, device discovery, per-channel service selection, variable /
   program selection, and hap-homematic backup import

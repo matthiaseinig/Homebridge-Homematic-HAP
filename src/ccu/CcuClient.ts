@@ -103,13 +103,18 @@ export class CcuClient extends EventEmitter {
     await this.refreshAddressInterfaceMap();
 
     const callbackHost = this.resolveCallbackHost();
-    const callbackUrl = `http://${callbackHost}:${this.config.eventServer.port}`;
+    const callbackUrl = `http://${callbackHost}:${this.eventServer.boundPort}`;
+    const needed = this.interfacesInUse();
 
     for (const { id, flag } of ENABLED_INTERFACES) {
       if (!this.config.interfaces[flag]) {
         continue;
       }
-      const callbackId = `${PLUGIN_NAME}:${id}`;
+      if (needed && !needed.has(id)) {
+        this.log.debug('No mapped channel on %s; not subscribing', id);
+        continue;
+      }
+      const callbackId = callbackIdFor(this.config.name, id);
       // Resolution order: explicit user override > listInterfaces discovery
       // > built-in default. The override is the only escape hatch when the
       // CCU's reported port isn't actually reachable from this host (the
@@ -357,6 +362,20 @@ export class CcuClient extends EventEmitter {
     return 'BidCos-RF';
   }
 
+  /**
+   * Interfaces this block's mapped channels live on. Every subscription
+   * makes the CCU push *all* of that interface's events to us, so a block
+   * that only maps HmIP channels should not also subscribe to BidCos-RF.
+   * `undefined` (subscribe to every enabled interface) when no channels
+   * are mapped, e.g. the config UI's discovery client.
+   */
+  private interfacesInUse(): Set<CcuInterfaceId> | undefined {
+    if (this.config.channels.length === 0) {
+      return undefined;
+    }
+    return new Set(this.config.channels.map((c) => this.interfaceForAddress(c.address)));
+  }
+
   private startWatchdog(): void {
     const intervalMs = Math.max(30_000, Math.floor(this.config.eventServer.watchdogSeconds * 1000 / 3));
     this.watchdogTimer = setInterval(() => {
@@ -390,6 +409,19 @@ export class CcuClient extends EventEmitter {
     }
     return '127.0.0.1';
   }
+}
+
+/**
+ * XML-RPC callback id. The default block keeps the historical id; other
+ * blocks (one per former hap-homematic bridge) get the block name in it so
+ * the CCU's subscription list shows which bridge a callback belongs to.
+ */
+export function callbackIdFor(blockName: string, interfaceId: CcuInterfaceId): string {
+  if (!blockName || blockName === 'HomematicHap') {
+    return `${PLUGIN_NAME}:${interfaceId}`;
+  }
+  const slug = blockName.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
+  return `${PLUGIN_NAME}:${slug || 'block'}:${interfaceId}`;
 }
 
 function stripInterfacePrefix(address: string): string {

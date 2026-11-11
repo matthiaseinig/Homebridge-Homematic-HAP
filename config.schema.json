@@ -89,6 +89,12 @@
           }
         }
       },
+      "hapHomematicIdentity": {
+        "title": "Keep hap-homematic HomeKit identities",
+        "type": "boolean",
+        "default": false,
+        "description": "Set by the identity-preserving migration (scripts/hap-homematic-to-config.mjs --preserve-identity). Reuses hap-homematic accessory UUIDs and service layout. Do not toggle on a paired bridge: every accessory would be replaced."
+      },
       "channels":  { "title": "Exposed channels",  "type": "array", "items": { "$ref": "#/definitions/channelMapping"  }, "default": [] },
       "variables": { "title": "Exposed variables", "type": "array", "items": { "$ref": "#/definitions/variableMapping" }, "default": [] },
       "programs":  { "title": "Exposed programs",  "type": "array", "items": { "$ref": "#/definitions/programMapping"  }, "default": [] }
@@ -101,7 +107,9 @@
           "name":    { "title": "Display name",        "type": "string" },
           "service": { "title": "Service class",       "type": "string" },
           "subtype": { "title": "Service variant",     "type": "string" },
-          "settings":{ "title": "Service settings",    "type": "object" }
+          "settings":{ "title": "Service settings",    "type": "object" },
+          "instance":{ "title": "hap-homematic bridge id", "type": "string" },
+          "uuidSeed":{ "title": "hap-homematic UUID seed (do not edit)", "type": "string" }
         },
         "required": ["address", "service"]
       },
@@ -111,7 +119,10 @@
           "name":        { "title": "Variable name",   "type": "string" },
           "displayName": { "title": "HomeKit name",    "type": "string" },
           "service":     { "title": "Service class",   "type": "string" },
-          "settings":    { "title": "Settings",        "type": "object" }
+          "subtype":     { "title": "Variant",         "type": "string" },
+          "settings":    { "title": "Settings",        "type": "object" },
+          "instance":    { "title": "hap-homematic bridge id", "type": "string" },
+          "uuidSeed":    { "title": "hap-homematic UUID seed (do not edit)", "type": "string" }
         },
         "required": ["name"]
       },

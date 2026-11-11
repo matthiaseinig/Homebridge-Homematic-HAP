@@ -33,6 +33,7 @@ import { humidityService } from './impl/HumidityAccessory.js';
 import { weatherStationService } from './impl/WeatherStationAccessory.js';
 import { leakService } from './impl/LeakAccessory.js';
 import { programmableSwitchService } from './impl/ProgrammableSwitchAccessory.js';
+import { keyPressSwitchService } from './impl/KeyPressSwitchAccessory.js';
 import { doorOpenerService } from './impl/DoorOpenerAccessory.js';
 import { garageDoorService } from './impl/GarageDoorAccessory.js';
 import { lockService } from './impl/LockAccessory.js';
@@ -57,6 +58,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   weatherStationService,
   leakService,
   programmableSwitchService,
+  keyPressSwitchService,
   doorOpenerService,
   garageDoorService,
   lockService,

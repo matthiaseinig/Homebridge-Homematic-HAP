@@ -21,6 +21,12 @@ import { parseXml, serializeFault, serializeResponse } from './xmlRpc.js';
 import type { PrefixedLogger } from '../util/logger.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+/**
+ * How many consecutive ports to try when the configured one is taken.
+ * Several platform blocks (one Homebridge child bridge per former
+ * hap-homematic bridge) on one host would otherwise all fight over 9875.
+ */
+export const PORT_FALLBACK_SPAN = 64;
 
 export interface EventServerOptions {
   host: string;
@@ -49,6 +55,7 @@ export class EventServer extends EventEmitter {
   private readonly port: number;
   private readonly log: PrefixedLogger;
   private server: http.Server | undefined;
+  private actualPort: number | undefined;
 
   constructor(opts: EventServerOptions) {
     super();
@@ -64,17 +71,56 @@ export class EventServer extends EventEmitter {
     return super.emit(event, ...args);
   }
 
+  /** Port actually bound (may differ from the configured one), once started. */
+  get boundPort(): number {
+    return this.actualPort ?? this.port;
+  }
+
   async start(): Promise<void> {
+    let lastErr: Error | undefined;
+    for (let offset = 0; offset < PORT_FALLBACK_SPAN; offset++) {
+      const port = this.port + offset;
+      if (port > 65535) {
+        break;
+      }
+      try {
+        await this.listenOn(port);
+        if (offset > 0) {
+          this.log.warn(
+            'Event server port %d is in use; using %d instead. Give each platform block '
+              + 'its own eventServer.port to keep the CCU callback URL stable.',
+            this.port, port,
+          );
+        }
+        return;
+      } catch (err) {
+        lastErr = err as Error;
+        if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+          this.emit('error', lastErr);
+          throw lastErr;
+        }
+      }
+    }
+    const err = lastErr ?? new Error(`No free event server port from ${this.port}`);
+    this.emit('error', err);
+    throw err;
+  }
+
+  private listenOn(port: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const server = http.createServer((req, res) => this.handleRequest(req, res));
-      server.on('error', (err) => {
-        this.emit('error', err);
+      const onError = (err: Error): void => {
+        server.close();
         reject(err);
-      });
-      server.listen(this.port, this.host, () => {
+      };
+      server.once('error', onError);
+      server.listen(port, this.host, () => {
+        server.off('error', onError);
+        server.on('error', (err) => this.emit('error', err));
         this.server = server;
-        this.log.info('Event server listening on %s:%d', this.host, this.port);
-        this.emit('listening', { host: this.host, port: this.port });
+        this.actualPort = port;
+        this.log.info('Event server listening on %s:%d', this.host, port);
+        this.emit('listening', { host: this.host, port });
         resolve();
       });
     });

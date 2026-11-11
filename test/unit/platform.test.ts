@@ -58,9 +58,11 @@ beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hb-platform-'));
 });
 
+// didFinishLaunching does real fs work (storage root). setImmediate-only
+// flushing raced it on a loaded machine; give each round a few ms.
 async function flushAsync(rounds = 20): Promise<void> {
   for (let i = 0; i < rounds; i++) {
-    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, 5));
   }
 }
 
@@ -262,5 +264,53 @@ describe('HomematicPlatform', () => {
     api.emit(APIEvent.DID_FINISH_LAUNCHING);
     await flushAsync();
     expect(vi.mocked(log.warn)).toHaveBeenCalled();
+  });
+
+  describe('hap-homematic identity', () => {
+    async function launch(hapHomematicIdentity: boolean) {
+      const log = makeLog();
+      const api = makeApi();
+      const config = {
+        platform: 'HomematicHap',
+        ccuIp: '127.0.0.1',
+        hapHomematicIdentity,
+        channels: [{ address: 'HmIP.0:1', service: 'SwitchAccessory', name: 'Lamp', uuidSeed: 'SWITCH:Lamp' }],
+        variables: [{ name: 'V1', displayName: 'Soc', subtype: 'humidity', uuidSeed: 'undefined:Soc' }],
+      };
+      const platform = new HomematicPlatform(log, config, api as unknown as API);
+      const ccu = platform.getCcu()!;
+      vi.spyOn(ccu, 'start').mockResolvedValue(undefined);
+      const listDevices = vi.spyOn(ccu, 'listDevices').mockResolvedValue([
+        { address: 'HmIP.0', type: 'X', name: 'D', interface: 'HmIP-RF', channels: [{ address: 'HmIP.0:1', index: 1, type: 'SWITCH', name: 'C' }] },
+      ]);
+      vi.spyOn(ccu, 'listVariables').mockResolvedValue([
+        { id: '1', name: 'V1', valuetype: 4, subtype: 0, value: 50 } as CcuVariable,
+      ]);
+      api.emit(APIEvent.DID_FINISH_LAUNCHING);
+      for (let i = 0; i < 20 && api.registered.length < 2; i++) {
+        await flushAsync(20);
+      }
+      return { api, listDevices };
+    }
+
+    it('uses the uuidSeed and legacy layout when enabled', async () => {
+      const { api } = await launch(true);
+      const uuids = api.registered.map((a) => a.UUID).sort();
+      expect(uuids).toEqual(['uuid:SWITCH:Lamp', 'uuid:undefined:Soc']);
+      const v = api.registered.find((a) => a.UUID === 'uuid:undefined:Soc')!;
+      expect(v.context).toMatchObject({ kind: 'variable', subtype: 'humidity', legacyLayout: true });
+    });
+
+    it('ignores the seed when disabled', async () => {
+      const { api } = await launch(false);
+      const uuids = api.registered.map((a) => a.UUID).sort();
+      expect(uuids).toEqual(['uuid:channel:HmIP.0:1', 'uuid:variable:V1']);
+      expect(api.registered.every((a) => (a.context as { legacyLayout?: boolean }).legacyLayout === false)).toBe(true);
+    });
+
+    it('lists CCU devices once per launch, not once per channel', async () => {
+      const { listDevices } = await launch(false);
+      expect(listDevices).toHaveBeenCalledTimes(1);
+    });
   });
 });

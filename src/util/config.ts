@@ -7,6 +7,7 @@
  * configured").
  */
 
+import { resolveMultiBridgeConfig } from '../multiBridge/config.js';
 import type {
   CcuInterfaceId,
   EventServerConfig,
@@ -107,7 +108,7 @@ export function resolveConfig(raw: RawConfig): ResolvedConfig {
     }
   }
 
-  return {
+  const base: ResolvedConfig = {
     name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'HomematicHap',
     ccuIp,
     interfaces,
@@ -118,5 +119,39 @@ export function resolveConfig(raw: RawConfig): ResolvedConfig {
     channels,
     variables,
     programs,
+    hapHomematicIdentity: raw.hapHomematicIdentity === true,
+  };
+  if (raw.multiBridge === undefined) {
+    return base;
+  }
+  return withMultiBridge(base, raw);
+}
+
+/**
+ * Multi-bridge mode: the block's own mapping lists must be empty (every
+ * mapping belongs to one of the bridges); the resolved lists become the
+ * union of the enabled bridges' mappings, which is what the CCU client
+ * needs to decide which interfaces to subscribe.
+ */
+function withMultiBridge(base: ResolvedConfig, raw: RawConfig): ResolvedConfig {
+  if (base.channels.length + base.variables.length + base.programs.length > 0) {
+    throw new ConfigError('multiBridge: put channels, variables and programs into the bridges, not into the block');
+  }
+  const hostBridge = (raw as { _bridge?: { username?: unknown; port?: unknown } })._bridge;
+  const multiBridge = resolveMultiBridgeConfig(raw.multiBridge!, {
+    eventServerPort: base.eventServer.port,
+    host: {
+      username: typeof hostBridge?.username === 'string' ? hostBridge.username : undefined,
+      port: typeof hostBridge?.port === 'number' ? hostBridge.port : undefined,
+    },
+  });
+  const enabled = multiBridge.bridges.filter((b) => b.enabled);
+  return {
+    ...base,
+    channels: enabled.flatMap((b) => b.channels),
+    variables: enabled.flatMap((b) => b.variables),
+    programs: enabled.flatMap((b) => b.programs),
+    hapHomematicIdentity: true,
+    multiBridge,
   };
 }
