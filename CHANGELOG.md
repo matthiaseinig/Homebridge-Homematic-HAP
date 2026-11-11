@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Blinds report live movement.** Window coverings push every
+  intermediate LEVEL as CurrentPosition, keep TargetPosition at the
+  commanded value until the move ends, and report PositionState
+  increasing/decreasing from WORKING/DIRECTION (classic BLIND) or
+  ACTIVITY_STATE (HmIP), falling back to the direction of LEVEL changes
+  and stopping when the level stops changing for 5 s. No accessory,
+  service or characteristic ids change.
+
 ## 1.4.0
 
 - **Multi-bridge mode.** One platform block can publish several HAP
